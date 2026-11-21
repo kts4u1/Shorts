@@ -12,7 +12,7 @@
   build/narration_raw.wav  (후처리 전)
   build/narration.json     (대사별 시각/검사 결과)
 
-사용법: python3 src/narration.py [--voice F5] [--out build/narration.wav]
+사용법: python3 src/narration.py [--voice F2] [--out build/narration.wav]
 """
 import argparse
 import json
@@ -128,8 +128,8 @@ def istft(X, win, total, n=1024, hop=256):
     return out[n:-n]
 
 
-def soften(x):
-    """날카로운 느낌 완화: 저역 정리, 2.5~4.5kHz 살짝 낮춤, 6kHz 이상 완만히 감쇠, 치찰음 동적 감소."""
+def soften(x, presence_db=-2.5, shelf_db=-5.0):
+    """날카로운 느낌 완화: 저역 정리, 2.5~4.5kHz(쏘는 대역) 낮춤, 6kHz 이상 완만히 감쇠, 치찰음 동적 감소."""
     n, hop = 1024, 256
     X, win, total = stft(x, n, hop)
     f = np.fft.rfftfreq(n, 1 / SR)
@@ -140,8 +140,8 @@ def soften(x):
     eq = np.ones_like(f)
     eq *= 1 / (1 + (80 / np.maximum(f, 1)) ** 4)                       # 80Hz 이하 정리
     eq *= db(1.5 * np.exp(-((lf - np.log2(250)) / 0.8) ** 2))           # 따뜻함 +1.5dB
-    eq *= db(-2.5 * np.exp(-((lf - np.log2(3300)) / 0.55) ** 2))        # 쏘는 대역 -2.5dB
-    eq *= db(-5.0 / (1 + np.exp(-(lf - np.log2(6500)) / 0.25)))         # 고역 셸빙 -5dB
+    eq *= db(presence_db * np.exp(-((lf - np.log2(3300)) / 0.6) ** 2))  # 쏘는 대역
+    eq *= db(shelf_db / (1 + np.exp(-(lf - np.log2(6500)) / 0.25)))     # 고역 셸빙
     X *= eq[None, :]
     # 치찰음(ㅅ,ㅆ,ㅊ 등) 동적 감소
     hf = f > 4500
@@ -154,22 +154,38 @@ def soften(x):
     return istft(X, win, total, n, hop)
 
 
+# ---------------------------------------------------------------- 목소리
+def load_style(tts, spec):
+    """'F2' 또는 'F2:0.75+F5:0.25' 처럼 여러 목소리를 비율대로 섞은 스타일."""
+    from supertonic import Style
+    parts = []
+    for p in spec.split("+"):
+        name, _, w = p.partition(":")
+        parts.append((tts.get_voice_style(name.strip()), float(w) if w else 1.0))
+    total = sum(w for _, w in parts)
+    ttl = sum(st.ttl * (w / total) for st, w in parts).astype(np.float32)
+    dp = sum(st.dp * (w / total) for st, w in parts).astype(np.float32)
+    return Style(ttl, dp)
+
+
 # ---------------------------------------------------------------- 메인
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--voice", default="F5")
+    ap.add_argument("--voice", default="F2", help="예: F2, M4, F2:0.75+F5:0.25")
     ap.add_argument("--out", default="build/narration.wav")
     ap.add_argument("--speed", type=float, default=1.0)
     ap.add_argument("--steps", type=int, default=32)
     ap.add_argument("--seed", type=int, default=2024)
     ap.add_argument("--tries", type=int, default=8)
+    ap.add_argument("--presence-db", type=float, default=-4.5, help="2.5~4.5kHz 감쇠량(dB)")
+    ap.add_argument("--shelf-db", type=float, default=-3.0, help="6kHz 이상 감쇠량(dB)")
     ap.add_argument("--no-verify", action="store_true", help="음성 인식 검증 생략")
     args = ap.parse_args()
 
     from supertonic import TTS
     tts = TTS(model="supertonic-3")
     assert tts.sample_rate == SR, tts.sample_rate
-    style = tts.get_voice_style(args.voice)
+    style = load_style(tts, args.voice)
 
     raw_track = np.zeros(int(DURATION * SR), dtype=np.float64)
     meta = []
@@ -212,7 +228,7 @@ def main():
         print(f"{start:5.2f}s  {len(seg) / SR:4.2f}s/{slot:4.2f}s  x{speed:.2f}  CER {err:.2f}  "
               f"끝잘림 {ab}  드롭아웃 {dr}  {text}")
 
-    soft = soften(raw_track)
+    soft = soften(raw_track, args.presence_db, args.shelf_db)
     soft = soft / (np.max(np.abs(soft)) + 1e-9) * 0.9
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     sf.write(os.path.splitext(args.out)[0] + "_raw.wav", raw_track.astype(np.float32), SR)
