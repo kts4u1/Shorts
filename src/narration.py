@@ -13,7 +13,7 @@
   build/narration_raw.wav  (후처리 전)
   build/narration.json     (대사별 시각/검사 결과)
 
-사용법: python3 src/narration.py [--voice "F2:0.75+F5:0.25"] [--out build/narration.wav]
+사용법: python3 src/narration.py [--voice F2] [--out build/narration.wav]
 """
 import argparse
 import json
@@ -187,7 +187,7 @@ def load_style(tts, spec):
 # ---------------------------------------------------------------- 메인
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--voice", default="F2:0.75+F5:0.25", help="예: F2, M4, F2:0.75+F5:0.25")
+    ap.add_argument("--voice", default="F2", help="예: F2, M4, F2:0.75+F5:0.25")
     ap.add_argument("--out", default="build/narration.wav")
     ap.add_argument("--speed", type=float, default=1.05, help="최종 말하기 속도")
     ap.add_argument("--steps", type=int, default=32)

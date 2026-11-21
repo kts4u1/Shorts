@@ -27,7 +27,7 @@
   헤드리스 Chromium 에서 렌더링 → `src/composite3d.py` 가 2D 버전과 같은 자막/UI 를 합성
   - 문어 동작·표정·소품 타이밍은 `src/scene3d_state.py` 가 2D 와 같은 계산으로 넘겨주므로 두 버전이 똑같이 움직임
 - **나레이션:** `src/narration.py` — [Supertone Supertonic](https://huggingface.co/Supertone/supertonic-3) 한국어 TTS(로컬 ONNX, OpenRAIL-M 라이선스)
-  - 목소리 `F2:0.75+F5:0.25` + 음높이·음색 +2반음(`--pitch`), 말하기 속도 1.05 — 젊고 경쾌한 톤
+  - 목소리 F2 + 음높이·음색 +2반음(`--pitch`), 말하기 속도 1.05 — 높고 발랄한 젊은 톤
     (TTS 를 느리게 합성한 뒤 재생 속도를 올려, 늘이기 처리 없이 음높이·포먼트를 함께 올림)
   - 대사마다 여러 번 합성해, 최종 영상과 같은 조건(음색 처리 + 배경음악)에서 자동 검사 후 선택:
     Whisper 받아쓰기(발음/누락), 끝 잘림, 말 도중 순간 끊김(드롭아웃)
@@ -47,7 +47,7 @@ pip install -r requirements.txt
 다른 목소리로 바꾸기 (F1–F5 여성, M1–M5 남성, 섞기 가능):
 
 ```bash
-python3 src/narration.py --voice F2 --out build/narration.wav && ./make_short.sh
+python3 src/narration.py --voice "F2:0.75+F5:0.25" --pitch 2 --out build/narration.wav && ./make_short.sh
 ```
 
 미리 보기:
