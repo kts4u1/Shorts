@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 """한국어 나레이션 생성 (Supertone Supertonic TTS, 로컬 ONNX 실행).
 
-각 대사를 장면 타이밍에 맞춰 합성하고, 주어진 구간에 들어가지 않으면
-말하기 속도를 올려 다시 합성한다. 결과:
-  build/narration.wav   (영상 길이 전체, 44.1kHz 모노)
-  build/narration.json  (대사별 실제 시작/끝 시각)
+대사마다 여러 번 합성해 아래 검사를 통과한 것을 고른다.
+  1) Whisper 음성 인식으로 받아 적어 대사와 비교 (발음/누락 검사)
+  2) 끝이 뚝 잘리지 않는지 (자연스럽게 잦아드는지)
+  3) 말하는 도중 순간적으로 소리가 빠지는 구간(드롭아웃)이 없는지
+그 후 목소리를 부드럽게 다듬는다 (고음역 완화 EQ + 치찰음 감소).
 
-사용법: python3 src/narration.py [--voice F1] [--out build/narration.wav]
+결과:
+  build/narration.wav      (영상 길이 전체, 44.1kHz 모노, 후처리 적용)
+  build/narration_raw.wav  (후처리 전)
+  build/narration.json     (대사별 시각/검사 결과)
+
+사용법: python3 src/narration.py [--voice F5] [--out build/narration.wav]
 """
 import argparse
 import json
 import os
+import re
 import sys
 
 import numpy as np
@@ -20,32 +27,73 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from timeline import DURATION, NARRATION  # noqa: E402
 
 SR = 44100
+PAD = 0.08          # 대사 앞뒤로 남겨 두는 여백(초)
+MAX_SPEED = 1.06    # 구간에 안 들어갈 때만 이 정도까지 살짝 빠르게
 
 
-def trim_silence(x, thr=0.01, pad=0.03):
-    idx = np.where(np.abs(x) > thr * np.max(np.abs(x)))[0]
-    if len(idx) == 0:
-        return x
-    a = max(0, idx[0] - int(pad * SR))
-    b = min(len(x), idx[-1] + int(pad * SR))
-    return x[a:b]
+# ---------------------------------------------------------------- 분석
+def frame_db(x, hop_s=0.005):
+    hop = int(hop_s * SR)
+    n = len(x) // hop
+    rms = np.sqrt(np.mean(x[: n * hop].reshape(n, hop) ** 2, axis=1)) + 1e-9
+    return 20 * np.log10(rms / rms.max())
 
 
+def speech_bounds(x, thr_db=-45):
+    db = frame_db(x)
+    idx = np.where(db > thr_db)[0]
+    hop = int(0.005 * SR)
+    return idx[0] * hop, (idx[-1] + 1) * hop
+
+
+def abrupt_end(x):
+    """마지막 음절이 잦아들지 않고 뚝 끊기면 True (5ms 사이 15dB 이상 급락)."""
+    db = frame_db(x)
+    voiced = np.where(db > -45)[0]
+    if len(voiced) == 0:
+        return False
+    last = voiced[-1]
+    w = db[max(0, last - 12):min(len(db), last + 4)]
+    steps = w[:-1] - w[1:]
+    return bool(np.any((steps > 15) & (w[:-1] > -22)))
+
+
+def dropouts(x):
+    """말하는 도중 25ms 이하로 소리가 거의 사라졌다 돌아오는 구간 수."""
+    db = frame_db(x)
+    s, e = np.where(db > -40)[0][[0, -1]]
+    cnt = 0
+    i = s
+    while i < e:
+        if db[i] < -36:
+            j = i
+            while j < e and db[j] < -36:
+                j += 1
+            dur = j - i
+            left = db[max(s, i - 3):i].max() if i > s else -99
+            right = db[j:min(e + 1, j + 3)].max()
+            if dur <= 5 and left > -16 and right > -16:
+                cnt += 1
+            i = j
+        else:
+            i += 1
+    return cnt
+
+
+# ---------------------------------------------------------------- 음성 인식 검증
 _ASR = None
 
 
 def asr_score(seg, text):
-    """faster-whisper 로 받아 적어 글자 오류율(CER)을 계산. 숫자 표기 차이는 허용."""
+    """faster-whisper 로 받아 적어 글자 오류율(CER) 계산. 숫자 표기 차이는 허용."""
     global _ASR
-    import re
     if _ASR is None:
         from faster_whisper import WhisperModel
         _ASR = WhisperModel("small", device="cpu", compute_type="int8")
     idx = np.linspace(0, len(seg) - 1, int(len(seg) * 16000 / SR)).astype(int)
     segs, _ = _ASR.transcribe(seg[idx].astype(np.float32), language="ko", beam_size=5)
     hyp = "".join(x.text for x in segs)
-    nums = {"3개": "세개", "2개": "두개", "1개": "한개", "3분의2": "삼분의이", "3분의 2": "삼분의이"}
-    for k, v in nums.items():
+    for k, v in {"3개": "세개", "2개": "두개", "1개": "한개", "3분의 2": "삼분의이", "3분의2": "삼분의이"}.items():
         hyp = hyp.replace(k, v)
 
     def norm(x):
@@ -61,12 +109,60 @@ def asr_score(seg, text):
     return d[len(h)] / max(1, len(r)), hyp.strip()
 
 
+# ---------------------------------------------------------------- 음색 다듬기
+def stft(x, n=1024, hop=256):
+    win = np.hanning(n)
+    pad = np.concatenate([np.zeros(n), x, np.zeros(n)])
+    frames = np.lib.stride_tricks.sliding_window_view(pad, n)[::hop] * win
+    return np.fft.rfft(frames, axis=1), win, len(pad)
+
+
+def istft(X, win, total, n=1024, hop=256):
+    frames = np.fft.irfft(X, n=n, axis=1) * win
+    out = np.zeros(total)
+    wsum = np.zeros(total)
+    for i, fr in enumerate(frames):
+        out[i * hop:i * hop + n] += fr
+        wsum[i * hop:i * hop + n] += win ** 2
+    out /= np.maximum(wsum, 1e-6)
+    return out[n:-n]
+
+
+def soften(x):
+    """날카로운 느낌 완화: 저역 정리, 2.5~4.5kHz 살짝 낮춤, 6kHz 이상 완만히 감쇠, 치찰음 동적 감소."""
+    n, hop = 1024, 256
+    X, win, total = stft(x, n, hop)
+    f = np.fft.rfftfreq(n, 1 / SR)
+    lf = np.log2(np.maximum(f, 1.0))
+
+    def db(g):
+        return 10 ** (g / 20)
+    eq = np.ones_like(f)
+    eq *= 1 / (1 + (80 / np.maximum(f, 1)) ** 4)                       # 80Hz 이하 정리
+    eq *= db(1.5 * np.exp(-((lf - np.log2(250)) / 0.8) ** 2))           # 따뜻함 +1.5dB
+    eq *= db(-2.5 * np.exp(-((lf - np.log2(3300)) / 0.55) ** 2))        # 쏘는 대역 -2.5dB
+    eq *= db(-5.0 / (1 + np.exp(-(lf - np.log2(6500)) / 0.25)))         # 고역 셸빙 -5dB
+    X *= eq[None, :]
+    # 치찰음(ㅅ,ㅆ,ㅊ 등) 동적 감소
+    hf = f > 4500
+    e_hf = np.sum(np.abs(X[:, hf]) ** 2, axis=1)
+    e_all = np.sum(np.abs(X) ** 2, axis=1) + 1e-12
+    ratio = e_hf / e_all
+    g = np.clip((0.22 / np.maximum(ratio, 1e-6)) ** 0.6, 0.4, 1.0)
+    g = np.convolve(g, np.ones(5) / 5, mode="same")
+    X[:, hf] *= g[:, None]
+    return istft(X, win, total, n, hop)
+
+
+# ---------------------------------------------------------------- 메인
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--voice", default="F1")
+    ap.add_argument("--voice", default="F5")
     ap.add_argument("--out", default="build/narration.wav")
-    ap.add_argument("--speed", type=float, default=1.08)
-    ap.add_argument("--seed", type=int, default=1234)
+    ap.add_argument("--speed", type=float, default=1.0)
+    ap.add_argument("--steps", type=int, default=32)
+    ap.add_argument("--seed", type=int, default=2024)
+    ap.add_argument("--tries", type=int, default=8)
     ap.add_argument("--no-verify", action="store_true", help="음성 인식 검증 생략")
     args = ap.parse_args()
 
@@ -75,44 +171,52 @@ def main():
     assert tts.sample_rate == SR, tts.sample_rate
     style = tts.get_voice_style(args.voice)
 
-    track = np.zeros(int(DURATION * SR), dtype=np.float32)
+    raw_track = np.zeros(int(DURATION * SR), dtype=np.float64)
     meta = []
     for li, (start, end, text) in enumerate(NARRATION):
         slot = end - start
         best = None
-        for attempt in range(6):
+        for attempt in range(args.tries):
             np.random.seed(args.seed + li * 100 + attempt)
             speed = args.speed
             while True:
-                wav, _ = tts.synthesize(text, voice_style=style, lang="ko", speed=speed, total_steps=12)
-                seg = trim_silence(wav[0].astype(np.float32))
-                dur = len(seg) / SR
-                if dur <= slot or speed >= 1.45:
+                wav, _ = tts.synthesize(text, voice_style=style, lang="ko", speed=speed, total_steps=args.steps)
+                x = wav[0].astype(np.float64)
+                a, b = speech_bounds(x)
+                dur = (b - a) / SR
+                if dur + PAD <= slot or speed >= MAX_SPEED:
                     break
-                speed = min(1.45, speed * min(1.12, dur / slot + 0.02))
-            if args.no_verify:
-                best = (0.0, seg, speed, "")
+                speed = min(MAX_SPEED, speed * (dur + PAD) / slot + 0.005)
+            a = max(0, a - int(PAD * SR))
+            b = min(len(x), b + int(PAD * SR))
+            seg = x[a:b]
+            ab, dr = abrupt_end(seg), dropouts(seg)
+            err, hyp = (0.0, "") if args.no_verify else asr_score(seg, text)
+            score = err * 10 + ab * 1.0 + dr * 0.6 + max(0.0, dur + PAD - slot) * 5
+            if best is None or score < best[0]:
+                best = (score, seg, speed, err, hyp, ab, dr)
+            if err <= 0.02 and not ab and dr == 0 and dur + PAD <= slot:
                 break
-            err, hyp = asr_score(seg, text)
-            if best is None or err < best[0]:
-                best = (err, seg, speed, hyp)
-            if err <= 0.02:
-                break
-            print(f"   재시도 {attempt + 1}: CER {err:.2f} '{hyp}'")
-        err, seg, speed, hyp = best
-        seg = seg / (np.max(np.abs(seg)) + 1e-9) * 0.95
-        fade = int(0.01 * SR)
-        seg[:fade] *= np.linspace(0, 1, fade)
-        seg[-fade:] *= np.linspace(1, 0, fade)
-        i0 = int(start * SR)
-        seg = seg[: len(track) - i0]
-        track[i0:i0 + len(seg)] += seg
-        meta.append({"start": start, "end": start + len(seg) / SR, "slot_end": end,
-                     "speed": round(speed, 3), "text": text, "asr": hyp, "cer": round(err, 3)})
-        print(f"{start:5.2f}s  {len(seg) / SR:4.2f}s/{slot:4.2f}s  x{speed:.2f}  CER {err:.2f}  {text}")
+            print(f"   재시도 {attempt + 1}: CER {err:.2f} 끝잘림 {ab} 드롭아웃 {dr} 길이 {dur:.2f}/{slot:.2f} '{hyp}'")
+        _, seg, speed, err, hyp, ab, dr = best
+        seg = seg / (np.max(np.abs(seg)) + 1e-9) * 0.9
+        fi, fo = int(0.02 * SR), int(0.06 * SR)
+        seg[:fi] *= np.linspace(0, 1, fi) ** 2
+        seg[-fo:] *= np.linspace(1, 0, fo) ** 2
+        i0 = int((start - PAD * 0.75) * SR)
+        seg = seg[: len(raw_track) - i0]
+        raw_track[i0:i0 + len(seg)] += seg
+        meta.append({"start": round(start - PAD * 0.75, 3), "end": round(start - PAD * 0.75 + len(seg) / SR, 3),
+                     "slot": [start, end], "speed": round(speed, 3), "text": text, "asr": hyp,
+                     "cer": round(err, 3), "abrupt_end": bool(ab), "dropouts": int(dr)})
+        print(f"{start:5.2f}s  {len(seg) / SR:4.2f}s/{slot:4.2f}s  x{speed:.2f}  CER {err:.2f}  "
+              f"끝잘림 {ab}  드롭아웃 {dr}  {text}")
 
+    soft = soften(raw_track)
+    soft = soft / (np.max(np.abs(soft)) + 1e-9) * 0.9
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-    sf.write(args.out, track, SR)
+    sf.write(os.path.splitext(args.out)[0] + "_raw.wav", raw_track.astype(np.float32), SR)
+    sf.write(args.out, soft.astype(np.float32), SR)
     with open(os.path.splitext(args.out)[0] + ".json", "w", encoding="utf-8") as f:
         json.dump({"voice": args.voice, "lines": meta}, f, ensure_ascii=False, indent=2)
     print("나레이션 저장:", args.out)

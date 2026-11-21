@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 what="${1:-all}"
 
 # 1) 나레이션(TTS) + 음악/효과음 믹스
-[ -f build/narration.wav ] || python3 src/narration.py --voice F1 --out build/narration.wav
+[ -f build/narration.wav ] || python3 src/narration.py --voice F5 --out build/narration.wav
 python3 src/audio.py build/audio_vo.wav --narration build/narration.wav
 
 # 2) 2D 버전

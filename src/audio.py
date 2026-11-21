@@ -318,6 +318,26 @@ def duck_envelope(voice, attack=0.06, release=0.35):
     return env
 
 
+def limiter(x, ceiling=0.89, look=0.004, release=0.12, block=32):
+    """찌그러짐 없이 피크만 살짝 눌러 주는 룩어헤드 리미터."""
+    peak = np.max(np.abs(x), axis=1)
+    nb = int(np.ceil(len(peak) / block))
+    pk = np.zeros(nb * block)
+    pk[:len(peak)] = peak
+    bmax = pk.reshape(nb, block).max(axis=1)
+    la = max(1, int(look * SR / block))
+    ahead = np.array([bmax[i:i + la + 1].max() for i in range(nb)])
+    target = np.minimum(1.0, ceiling / np.maximum(ahead, 1e-9))
+    rel = np.exp(-block / (release * SR))
+    g = np.empty(nb)
+    cur = 1.0
+    for i in range(nb):
+        cur = target[i] if target[i] < cur else target[i] + (cur - target[i]) * rel
+        g[i] = cur
+    gs = np.interp(np.arange(len(peak)), np.arange(nb) * block + block / 2, g)
+    return x * gs[:, None]
+
+
 def main():
     import argparse
     ap = argparse.ArgumentParser()
@@ -334,16 +354,16 @@ def main():
         active = env > 0.5
         voice_rms = np.sqrt(np.mean(voice[active] ** 2))
         bed_rms = np.sqrt(np.mean(music ** 2))
-        # 말이 없을 때 음악은 목소리보다 약 8dB 작게, 말할 때는 추가로 약 7dB 더 줄임
-        g = voice_rms * 10 ** (-8 / 20) / bed_rms
-        music *= g * (1 - 0.55 * env)[:, None]
+        # 말이 없을 때 음악은 목소리보다 약 9dB 작게, 말할 때는 추가로 약 6dB 더 줄임
+        g = voice_rms * 10 ** (-9 / 20) / bed_rms
+        music *= g * (1 - 0.5 * env)[:, None]
         fx *= g * (1 - 0.65 * env)[:, None]
-        mixd = music + fx + voice[:, None] * 1.0
+        mixd = music + fx + voice[:, None]
+        mixd *= 0.14 / voice_rms           # 목소리 평균 레벨 약 -17dBFS
     else:
-        mixd = music + fx
-    peak = np.max(np.abs(mixd))
-    mixd = np.tanh(mixd / peak * 1.1) / np.tanh(1.1) * 0.89
-    pcm = (mixd * 32767).astype(np.int16)
+        mixd = (music + fx) * (0.6 / np.max(np.abs(music + fx)))
+    mixd = limiter(mixd)
+    pcm = (np.clip(mixd, -1, 1) * 32767).astype(np.int16)
     with wave.open(out, "wb") as w:
         w.setnchannels(2)
         w.setsampwidth(2)
