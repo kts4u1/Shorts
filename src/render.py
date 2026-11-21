@@ -955,36 +955,50 @@ def draw_sparkle(ctx, x, y, r, a, col=WHITE):
     ctx.fill()
 
 
-def draw_hearts_scene(ctx, t):
+def hearts_layout(t):
+    """사실 1 하트 3개의 화면 배치 (2D/3D 공용)."""
     if not (3.95 <= t < 10.2):
-        return
+        return []
     out = ease_in(prog(t, 9.95, 10.15))
     r = ease_io(prog(t, 6.2, 6.7))
     pos0 = [(310, 870, 128), (540, 870, 128), (770, 870, 128)]
     pos1 = [(285, 880, 98), (540, 855, 158), (795, 880, 98)]
     starts = [4.0, 4.5, 5.0]
     beating = clamp((t - 5.5) / 0.3)
+    items = []
     for i in range(3):
         a = prog(t, starts[i], starts[i] + 0.4)
         if a <= 0:
             continue
         sc = ease_back(a, 2.4)
-        x = lerp(pos0[i][0], pos1[i][0], r)
-        y = lerp(pos0[i][1], pos1[i][1], r)
-        size = lerp(pos0[i][2], pos1[i][2], r)
         beat = heartbeat(t, 0.8, 0.12 * (i != 1)) * beating
-        size *= sc * (1 + 0.09 * beat) * (1 - out)
+        size = lerp(pos0[i][2], pos1[i][2], r) * sc * (1 + 0.09 * beat) * (1 - out)
+        items.append(dict(
+            i=i, x=lerp(pos0[i][0], pos1[i][0], r), y=lerp(pos0[i][1], pos1[i][1], r),
+            size=size, beat=beat, num=(1 - r) * clamp(a * 2),
+            label="온몸 심장" if i == 1 else "아가미 심장",
+            label_alpha=prog(t, 6.6, 6.9) * (1 - out),
+            label_scale=lerp(0.6, 1, ease_back(prog(t, 6.6, 6.9)))))
+    return items
+
+
+def draw_heart_labels(ctx, items):
+    for h in items:
+        if h["label_alpha"] > 0:
+            big = h["i"] == 1
+            text_line(ctx, [(h["label"], YELLOW if big else WHITE)], h["x"], h["y"] + h["size"] * 0.5 + 34,
+                      40 if big else 34, alpha=h["label_alpha"], scale=h["label_scale"], max_w=260)
+
+
+def draw_hearts_scene(ctx, t):
+    items = hearts_layout(t)
+    for h in items:
+        x, y, size = h["x"], h["y"], h["size"]
         draw_heart(ctx, x, y, size)
-        if r < 1:
-            text_line(ctx, [(str(i + 1), WHITE)], x, y - size * 0.05, size * 0.5,
-                      alpha=(1 - r) * clamp(a * 2), outline=size * 0.07, shadow=False)
-        la = prog(t, 6.6, 6.9) * (1 - out)
-        if la > 0:
-            label = "온몸 심장" if i == 1 else "아가미 심장"
-            fs = 40 if i == 1 else 34
-            col = YELLOW if i == 1 else WHITE
-            text_line(ctx, [(label, col)], x, y + size * 0.5 + 34, fs, alpha=la,
-                      scale=lerp(0.6, 1, ease_back(prog(t, 6.6, 6.9))), max_w=260)
+        if h["num"] > 0:
+            text_line(ctx, [(str(h["i"] + 1), WHITE)], x, y - size * 0.05, size * 0.5,
+                      alpha=h["num"], outline=size * 0.07, shadow=False)
+    draw_heart_labels(ctx, items)
 
 
 def drop_path(ctx, x, y, r):
@@ -1020,34 +1034,47 @@ def draw_drop(ctx, x, y, r, col, label, alpha=1.0):
               outline=r * 0.1, shadow=False)
 
 
-def draw_blood_scene(ctx, t):
+def blood_layout(t):
+    """사실 2 핏방울 배치 (2D/3D 공용)."""
     if not (10.85 <= t < 16.6):
-        return
+        return None
     out = ease_in(prog(t, 16.35, 16.55))
-    items = [(10.9, 300, hx("#ff3b4e"), "Fe", "사람"), (11.5, 780, hx("#3b8bff"), "Cu", "문어")]
-    for t0, x, col, el, who in items:
+    drops = []
+    for t0, x, col, el, who in [(10.9, 300, "#ff3b4e", "Fe", "사람"), (11.5, 780, "#3b8bff", "Cu", "문어")]:
         a = prog(t, t0, t0 + 0.4)
         if a <= 0:
             continue
         sc = ease_back(a, 2.4) * (1 - out)
-        r = 66 * sc
-        y = 925 + 8 * math.sin(t * 2.4 + x)
-        draw_drop(ctx, x, y, r, col, el)
-        text_line(ctx, [(who, YELLOW if who == "문어" else WHITE)], x, y + 66 + 42, 40,
-                  alpha=clamp(a * 2) * (1 - out), scale=sc)
-    va = prog(t, 11.25, 11.5) * (1 - out)
-    if va > 0:
-        text_line(ctx, [("VS", WHITE)], 540, 880, 64, alpha=va,
-                  scale=ease_back(prog(t, 11.25, 11.55), 2.5))
-    # 파란 피 반짝이
+        drops.append(dict(x=x, y=925 + 8 * math.sin(t * 2.4 + x), r=66 * sc, col=col, el=el, who=who,
+                          label_alpha=clamp(a * 2) * (1 - out), label_scale=sc))
+    return dict(drops=drops, out=out, vs_alpha=prog(t, 11.25, 11.5) * (1 - out),
+                vs_scale=ease_back(prog(t, 11.25, 11.55), 2.5))
+
+
+def draw_blood_overlay(ctx, t, lay):
+    """핏방울을 제외한 라벨/VS/반짝이."""
+    for d in lay["drops"]:
+        text_line(ctx, [(d["who"], YELLOW if d["who"] == "문어" else WHITE)], d["x"], d["y"] + 66 + 42, 40,
+                  alpha=d["label_alpha"], scale=d["label_scale"])
+    if lay["vs_alpha"] > 0:
+        text_line(ctx, [("VS", WHITE)], 540, 880, 64, alpha=lay["vs_alpha"], scale=lay["vs_scale"])
     if t >= 11.6:
         for k in range(5):
             ph = ((t - 11.6) * 1.2 + k / 5) % 1.0
             ang = k * TAU / 5 + t * 0.8
             rr_ = 95 + 25 * ph
-            a = bump(ph) * (1 - out)
+            a = bump(ph) * (1 - lay["out"])
             draw_sparkle(ctx, 780 + rr_ * math.cos(ang), 880 + rr_ * math.sin(ang) * 0.9,
                          18 * a + 4, a, CYAN if k % 2 else WHITE)
+
+
+def draw_blood_scene(ctx, t):
+    lay = blood_layout(t)
+    if lay is None:
+        return
+    for d in lay["drops"]:
+        draw_drop(ctx, d["x"], d["y"], d["r"], hx(d["col"]), d["el"])
+    draw_blood_overlay(ctx, t, lay)
 
 
 def ecg_wave(tau):
@@ -1180,14 +1207,23 @@ def draw_swim_fx(ctx, st, t):
             draw_bubble(ctx, bx, by, r, 0.75 * (1 - age / 1.1))
 
 
-def draw_pie_scene(ctx, t):
+def pie_layout(t):
+    """사실 4 원그래프 (2D/3D 공용)."""
     if not (23.15 <= t < 27.6):
-        return
+        return None
     a = ease_back(prog(t, 23.2, 23.55), 2.0)
     out = prog(t, 27.35, 27.55)
-    fill = ease_io(prog(t, 23.35, 24.1))
-    al = (1 - out)
-    cx, cy, r = 540, 865, 100 * a * (1 - 0.3 * out)
+    return dict(cx=540, cy=865, r=100 * a * (1 - 0.3 * out), fill=ease_io(prog(t, 23.35, 24.1)),
+                alpha=1 - out, label_alpha=prog(t, 23.9, 24.2) * (1 - out),
+                sparkle=prog(t, 23.4, 23.7))
+
+
+def draw_pie_scene(ctx, t):
+    lay = pie_layout(t)
+    if lay is None:
+        return
+    fill, al = lay["fill"], lay["alpha"]
+    cx, cy, r = lay["cx"], lay["cy"], lay["r"]
     circle(ctx, cx, cy + 8, r)
     ctx.set_source_rgba(0, 0, 0, 0.25 * al)
     ctx.fill()

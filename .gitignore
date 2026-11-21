@@ -1,3 +1,4 @@
 build/
 __pycache__/
 *.pyc
+3d/node_modules/

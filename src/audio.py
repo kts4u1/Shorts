@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """배경음악 + 효과음 합성 (numpy 만 사용, 저작권 걱정 없는 자체 제작 사운드).
 
-사용법: python3 src/audio.py build/audio.wav
+사용법: python3 src/audio.py build/audio.wav [--narration build/narration.wav]
 """
 import os
 import sys
@@ -275,7 +275,7 @@ def make_sfx():
     fx = np.zeros((N, 2))
     for t0, kind, params in SFX:
         fn, g = SFX_FUNCS[kind]
-        place(fx, t0, fn(params), gain=g)
+        place(fx, t0, fn(params), gain=g * params.get("g", 1.0))
     for tp in ecg_peak_times():
         place(fx, tp, sfx_beep(), gain=0.11)
     for tj in jet_times():
@@ -283,10 +283,64 @@ def make_sfx():
     return fx
 
 
+def load_narration(path):
+    import soundfile as sf
+    v, sr = sf.read(path, dtype="float32")
+    assert sr == SR, sr
+    if v.ndim > 1:
+        v = v.mean(axis=1)
+    out = np.zeros(N, dtype=np.float64)
+    out[: min(N, len(v))] = v[:N]
+    return out
+
+
+def duck_envelope(voice, attack=0.06, release=0.35):
+    """나레이션이 나오는 동안 1, 아니면 0 인 부드러운 곡선."""
+    win = int(0.02 * SR)
+    rms = np.sqrt(np.convolve(voice ** 2, np.ones(win) / win, mode="same"))
+    active = (rms > 0.02).astype(float)
+    # 짧은 쉼(0.25초 이하)은 계속 말하는 것으로 간주
+    hold = int(0.25 * SR)
+    active = np.convolve(active, np.ones(hold), mode="same") > 0
+    env = np.zeros(N)
+    a_up = 1 - np.exp(-1 / (attack * SR))
+    a_dn = 1 - np.exp(-1 / (release * SR))
+    step = 64  # 블록 단위로 계산 (충분히 부드러움)
+    e = 0.0
+    for i in range(0, N, step):
+        target = 1.0 if active[i] else 0.0
+        a = a_up if target > e else a_dn
+        e += (target - e) * (1 - (1 - a) ** step)
+        env[i:i + step] = e
+    # 0.1초 미리 줄이기 (말 시작과 겹치는 효과음이 첫 음절을 가리지 않도록)
+    look = int(0.1 * SR)
+    env = np.concatenate([env[look:], np.full(look, env[-1])])
+    return env
+
+
 def main():
-    out = sys.argv[1] if len(sys.argv) > 1 else "build/audio.wav"
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("out", nargs="?", default="build/audio.wav")
+    ap.add_argument("--narration", default=None, help="나레이션 wav (있으면 음악 더킹 후 믹스)")
+    args = ap.parse_args()
+    out = args.out
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
-    mixd = compose() * 0.9 + make_sfx()
+    music = compose() * 0.9
+    fx = make_sfx()
+    if args.narration:
+        voice = load_narration(args.narration)
+        env = duck_envelope(voice)
+        active = env > 0.5
+        voice_rms = np.sqrt(np.mean(voice[active] ** 2))
+        bed_rms = np.sqrt(np.mean(music ** 2))
+        # 말이 없을 때 음악은 목소리보다 약 8dB 작게, 말할 때는 추가로 약 7dB 더 줄임
+        g = voice_rms * 10 ** (-8 / 20) / bed_rms
+        music *= g * (1 - 0.55 * env)[:, None]
+        fx *= g * (1 - 0.65 * env)[:, None]
+        mixd = music + fx + voice[:, None] * 1.0
+    else:
+        mixd = music + fx
     peak = np.max(np.abs(mixd))
     mixd = np.tanh(mixd / peak * 1.1) / np.tanh(1.1) * 0.89
     pcm = (mixd * 32767).astype(np.int16)
