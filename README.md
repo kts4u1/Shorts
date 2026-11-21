@@ -27,10 +27,11 @@
   헤드리스 Chromium 에서 렌더링 → `src/composite3d.py` 가 2D 버전과 같은 자막/UI 를 합성
   - 문어 동작·표정·소품 타이밍은 `src/scene3d_state.py` 가 2D 와 같은 계산으로 넘겨주므로 두 버전이 똑같이 움직임
 - **나레이션:** `src/narration.py` — [Supertone Supertonic](https://huggingface.co/Supertone/supertonic-3) 한국어 TTS(로컬 ONNX, OpenRAIL-M 라이선스)
-  - 목소리 F2(밝고 어린 느낌의 경쾌한 여성 톤), 기본 속도 1.0 — `F2:0.75+F5:0.25` 처럼 여러 목소리를 섞을 수도 있음
-  - 대사마다 여러 번 합성해 자동 검사 후 선택: Whisper 받아쓰기(발음/누락), 끝 잘림, 말 도중 순간 끊김(드롭아웃)
+  - 목소리 `F2:0.75+F5:0.25` (밝고 경쾌한 F2에 차분한 F5를 25% 섞은 톤), 기본 속도 1.0
+  - 대사마다 여러 번 합성해, 최종 영상과 같은 조건(음색 처리 + 배경음악)에서 자동 검사 후 선택:
+    Whisper 받아쓰기(발음/누락), 끝 잘림, 말 도중 순간 끊김(드롭아웃)
   - 후처리로 날카로운 대역(2.5~4.5kHz, `--presence-db`)과 고역(`--shelf-db`)을 완만히 줄이고 치찰음(ㅅ·ㅆ·ㅊ)을 동적으로 감소
-- **음악/효과음:** `src/audio.py` — numpy 로 합성, 나레이션이 나올 때 음악·효과음을 자동으로 줄임(더킹), 찌그러짐 없는 리미터로 마무리(약 -15 LUFS)
+- **음악/효과음:** `src/audio.py` — numpy 로 합성, 나레이션이 나올 때 음악·효과음을 자동으로 줄임(더킹), 대사 첫 음절 구간은 효과음을 추가로 줄임, 찌그러짐 없는 리미터로 마무리(약 -15 LUFS)
 - **공용 타임라인:** `src/timeline.py` — 장면, 나레이션, 효과음 타이밍
 
 ## 다시 만들기
@@ -41,10 +42,10 @@ pip install -r requirements.txt
 ./make_short.sh          # 2D + 3D (2d / 3d 인자로 하나만 가능)
 ```
 
-다른 목소리로 바꾸기 (F1–F5 여성, M1–M5 남성, 기본 F2):
+다른 목소리로 바꾸기 (F1–F5 여성, M1–M5 남성, 섞기 가능):
 
 ```bash
-python3 src/narration.py --voice "F2:0.75+F5:0.25" --out build/narration.wav && ./make_short.sh
+python3 src/narration.py --voice F2 --out build/narration.wav && ./make_short.sh
 ```
 
 미리 보기:

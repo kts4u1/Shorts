@@ -5,14 +5,15 @@
   1) Whisper 음성 인식으로 받아 적어 대사와 비교 (발음/누락 검사)
   2) 끝이 뚝 잘리지 않는지 (자연스럽게 잦아드는지)
   3) 말하는 도중 순간적으로 소리가 빠지는 구간(드롭아웃)이 없는지
-그 후 목소리를 부드럽게 다듬는다 (고음역 완화 EQ + 치찰음 감소).
+검사는 최종 영상과 같은 조건(음색 처리 + 배경음악)에서 한다.
+음색 처리: 고음역 완화 EQ + 치찰음 감소.
 
 결과:
   build/narration.wav      (영상 길이 전체, 44.1kHz 모노, 후처리 적용)
   build/narration_raw.wav  (후처리 전)
   build/narration.json     (대사별 시각/검사 결과)
 
-사용법: python3 src/narration.py [--voice F2] [--out build/narration.wav]
+사용법: python3 src/narration.py [--voice "F2:0.75+F5:0.25"] [--out build/narration.wav]
 """
 import argparse
 import json
@@ -171,7 +172,7 @@ def load_style(tts, spec):
 # ---------------------------------------------------------------- 메인
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--voice", default="F2", help="예: F2, M4, F2:0.75+F5:0.25")
+    ap.add_argument("--voice", default="F2:0.75+F5:0.25", help="예: F2, M4, F2:0.75+F5:0.25")
     ap.add_argument("--out", default="build/narration.wav")
     ap.add_argument("--speed", type=float, default=1.0)
     ap.add_argument("--steps", type=int, default=32)
@@ -187,10 +188,25 @@ def main():
     assert tts.sample_rate == SR, tts.sample_rate
     style = load_style(tts, args.voice)
 
+    # 최종 영상과 같은 조건(음색 처리 + 배경음악)에서 검사하기 위해 음악 트랙을 미리 만든다
+    import audio as A
+    bed = A.compose().mean(axis=1) * 0.9
+    bed_rms = np.sqrt(np.mean(bed ** 2)) + 1e-9
+
+    def finish(seg):
+        seg = seg / (np.max(np.abs(seg)) + 1e-9) * 0.9
+        fi, fo = int(0.02 * SR), int(0.06 * SR)
+        seg[:fi] *= np.linspace(0, 1, fi) ** 2
+        seg[-fo:] *= np.linspace(1, 0, fo) ** 2
+        proc = soften(seg, args.presence_db, args.shelf_db)
+        return seg, proc / (np.max(np.abs(proc)) + 1e-9) * 0.9
+
     raw_track = np.zeros(int(DURATION * SR), dtype=np.float64)
+    track = np.zeros_like(raw_track)
     meta = []
     for li, (start, end, text) in enumerate(NARRATION):
         slot = end - start
+        i0 = int((start - PAD * 0.75) * SR)
         best = None
         for attempt in range(args.tries):
             np.random.seed(args.seed + li * 100 + attempt)
@@ -205,34 +221,34 @@ def main():
                 speed = min(MAX_SPEED, speed * (dur + PAD) / slot + 0.005)
             a = max(0, a - int(PAD * SR))
             b = min(len(x), b + int(PAD * SR))
-            seg = x[a:b]
-            ab, dr = abrupt_end(seg), dropouts(seg)
-            err, hyp = (0.0, "") if args.no_verify else asr_score(seg, text)
+            seg, proc = finish(x[a:b])
+            ab, dr = abrupt_end(proc), dropouts(proc)
+            if args.no_verify:
+                err, hyp = 0.0, ""
+            else:
+                act = proc[np.abs(proc) > 0.01]
+                g = np.sqrt(np.mean(act ** 2)) * 10 ** (-9 / 20) / bed_rms * 0.5
+                music = bed[i0:i0 + len(proc)]
+                err, hyp = asr_score(proc[:len(music)] + music * g, text)
             score = err * 10 + ab * 1.0 + dr * 0.6 + max(0.0, dur + PAD - slot) * 5
             if best is None or score < best[0]:
-                best = (score, seg, speed, err, hyp, ab, dr)
+                best = (score, seg, proc, speed, err, hyp, ab, dr)
             if err <= 0.02 and not ab and dr == 0 and dur + PAD <= slot:
                 break
             print(f"   재시도 {attempt + 1}: CER {err:.2f} 끝잘림 {ab} 드롭아웃 {dr} 길이 {dur:.2f}/{slot:.2f} '{hyp}'")
-        _, seg, speed, err, hyp, ab, dr = best
-        seg = seg / (np.max(np.abs(seg)) + 1e-9) * 0.9
-        fi, fo = int(0.02 * SR), int(0.06 * SR)
-        seg[:fi] *= np.linspace(0, 1, fi) ** 2
-        seg[-fo:] *= np.linspace(1, 0, fo) ** 2
-        i0 = int((start - PAD * 0.75) * SR)
-        seg = seg[: len(raw_track) - i0]
-        raw_track[i0:i0 + len(seg)] += seg
-        meta.append({"start": round(start - PAD * 0.75, 3), "end": round(start - PAD * 0.75 + len(seg) / SR, 3),
+        _, seg, proc, speed, err, hyp, ab, dr = best
+        n = min(len(proc), len(track) - i0)
+        raw_track[i0:i0 + n] += seg[:n]
+        track[i0:i0 + n] += proc[:n]
+        meta.append({"start": round(start - PAD * 0.75, 3), "end": round(start - PAD * 0.75 + n / SR, 3),
                      "slot": [start, end], "speed": round(speed, 3), "text": text, "asr": hyp,
                      "cer": round(err, 3), "abrupt_end": bool(ab), "dropouts": int(dr)})
-        print(f"{start:5.2f}s  {len(seg) / SR:4.2f}s/{slot:4.2f}s  x{speed:.2f}  CER {err:.2f}  "
+        print(f"{start:5.2f}s  {n / SR:4.2f}s/{slot:4.2f}s  x{speed:.2f}  CER {err:.2f}  "
               f"끝잘림 {ab}  드롭아웃 {dr}  {text}")
 
-    soft = soften(raw_track, args.presence_db, args.shelf_db)
-    soft = soft / (np.max(np.abs(soft)) + 1e-9) * 0.9
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     sf.write(os.path.splitext(args.out)[0] + "_raw.wav", raw_track.astype(np.float32), SR)
-    sf.write(args.out, soft.astype(np.float32), SR)
+    sf.write(args.out, track.astype(np.float32), SR)
     with open(os.path.splitext(args.out)[0] + ".json", "w", encoding="utf-8") as f:
         json.dump({"voice": args.voice, "lines": meta}, f, ensure_ascii=False, indent=2)
     print("나레이션 저장:", args.out)

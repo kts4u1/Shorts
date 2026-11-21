@@ -358,6 +358,19 @@ def main():
         g = voice_rms * 10 ** (-9 / 20) / bed_rms
         music *= g * (1 - 0.5 * env)[:, None]
         fx *= g * (1 - 0.65 * env)[:, None]
+        # 대사 첫 음절이 효과음에 묻히지 않도록 말 시작 직후 0.3초는 효과음을 더 줄임
+        meta_path = os.path.splitext(args.narration)[0] + ".json"
+        if os.path.exists(meta_path):
+            import json
+            with open(meta_path, encoding="utf-8") as f:
+                lines = json.load(f)["lines"]
+            protect = np.zeros(N)
+            for ln in lines:
+                a0, a1 = int(ln["start"] * SR), int((ln["start"] + 0.4) * SR)
+                protect[max(0, a0):min(N, a1)] = 1.0
+            ramp = int(0.02 * SR)
+            protect = np.convolve(protect, np.ones(ramp) / ramp, mode="same")
+            fx *= (1 - 0.85 * protect)[:, None]
         mixd = music + fx + voice[:, None]
         mixd *= 0.14 / voice_rms           # 목소리 평균 레벨 약 -17dBFS
     else:
