@@ -29,7 +29,7 @@ from timeline import DURATION, NARRATION  # noqa: E402
 
 SR = 44100
 PAD = 0.08          # 대사 앞뒤로 남겨 두는 여백(초)
-MAX_SPEED = 1.06    # 구간에 안 들어갈 때만 이 정도까지 살짝 빠르게
+MAX_SPEED = 1.10    # 구간에 안 들어갈 때만 이 정도까지 살짝 빠르게
 
 
 # ---------------------------------------------------------------- 분석
@@ -129,7 +129,7 @@ def istft(X, win, total, n=1024, hop=256):
     return out[n:-n]
 
 
-def soften(x, presence_db=-2.5, shelf_db=-5.0):
+def soften(x, presence_db=-2.5, shelf_db=-5.0, warmth_db=1.5):
     """날카로운 느낌 완화: 저역 정리, 2.5~4.5kHz(쏘는 대역) 낮춤, 6kHz 이상 완만히 감쇠, 치찰음 동적 감소."""
     n, hop = 1024, 256
     X, win, total = stft(x, n, hop)
@@ -140,7 +140,7 @@ def soften(x, presence_db=-2.5, shelf_db=-5.0):
         return 10 ** (g / 20)
     eq = np.ones_like(f)
     eq *= 1 / (1 + (80 / np.maximum(f, 1)) ** 4)                       # 80Hz 이하 정리
-    eq *= db(1.5 * np.exp(-((lf - np.log2(250)) / 0.8) ** 2))           # 따뜻함 +1.5dB
+    eq *= db(warmth_db * np.exp(-((lf - np.log2(250)) / 0.8) ** 2))     # 저음 따뜻함
     eq *= db(presence_db * np.exp(-((lf - np.log2(3300)) / 0.6) ** 2))  # 쏘는 대역
     eq *= db(shelf_db / (1 + np.exp(-(lf - np.log2(6500)) / 0.25)))     # 고역 셸빙
     X *= eq[None, :]
@@ -156,6 +156,21 @@ def soften(x, presence_db=-2.5, shelf_db=-5.0):
 
 
 # ---------------------------------------------------------------- 목소리
+def pitch_up(x, ratio):
+    """재생 속도를 ratio 배로 올려 음높이·포먼트를 함께 올림 (길이는 1/ratio).
+    TTS 를 ratio 배 느리게 합성한 뒤 적용하면 말 빠르기는 그대로, 목소리만 젊어진다."""
+    if abs(ratio - 1.0) < 1e-4:
+        return x
+    pad = int(0.1 * SR)
+    xp = np.concatenate([np.zeros(pad), x, np.zeros(pad)])
+    n = len(xp)
+    m = int(round(n / ratio))
+    X = np.fft.rfft(xp)
+    y = np.fft.irfft(X[: m // 2 + 1], m) * (m / n)
+    p2 = int(round(pad / ratio))
+    return y[p2:len(y) - p2]
+
+
 def load_style(tts, spec):
     """'F2' 또는 'F2:0.75+F5:0.25' 처럼 여러 목소리를 비율대로 섞은 스타일."""
     from supertonic import Style
@@ -174,12 +189,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--voice", default="F2:0.75+F5:0.25", help="예: F2, M4, F2:0.75+F5:0.25")
     ap.add_argument("--out", default="build/narration.wav")
-    ap.add_argument("--speed", type=float, default=1.0)
+    ap.add_argument("--speed", type=float, default=1.05, help="최종 말하기 속도")
     ap.add_argument("--steps", type=int, default=32)
     ap.add_argument("--seed", type=int, default=2024)
     ap.add_argument("--tries", type=int, default=8)
-    ap.add_argument("--presence-db", type=float, default=-4.5, help="2.5~4.5kHz 감쇠량(dB)")
-    ap.add_argument("--shelf-db", type=float, default=-3.0, help="6kHz 이상 감쇠량(dB)")
+    ap.add_argument("--pitch", type=float, default=2.0, help="음높이·음색을 올릴 반음 수 (젊은 느낌)")
+    ap.add_argument("--presence-db", type=float, default=-2.5, help="2.5~4.5kHz 감쇠량(dB)")
+    ap.add_argument("--shelf-db", type=float, default=-1.5, help="6kHz 이상 감쇠량(dB)")
+    ap.add_argument("--warmth-db", type=float, default=0.0, help="250Hz 부근 보정(dB)")
     ap.add_argument("--no-verify", action="store_true", help="음성 인식 검증 생략")
     args = ap.parse_args()
 
@@ -198,9 +215,10 @@ def main():
         fi, fo = int(0.02 * SR), int(0.06 * SR)
         seg[:fi] *= np.linspace(0, 1, fi) ** 2
         seg[-fo:] *= np.linspace(1, 0, fo) ** 2
-        proc = soften(seg, args.presence_db, args.shelf_db)
+        proc = soften(seg, args.presence_db, args.shelf_db, args.warmth_db)
         return seg, proc / (np.max(np.abs(proc)) + 1e-9) * 0.9
 
+    ratio = 2 ** (args.pitch / 12)
     raw_track = np.zeros(int(DURATION * SR), dtype=np.float64)
     track = np.zeros_like(raw_track)
     meta = []
@@ -212,8 +230,8 @@ def main():
             np.random.seed(args.seed + li * 100 + attempt)
             speed = args.speed
             while True:
-                wav, _ = tts.synthesize(text, voice_style=style, lang="ko", speed=speed, total_steps=args.steps)
-                x = wav[0].astype(np.float64)
+                wav, _ = tts.synthesize(text, voice_style=style, lang="ko", speed=speed / ratio, total_steps=args.steps)
+                x = pitch_up(wav[0].astype(np.float64), ratio)
                 a, b = speech_bounds(x)
                 dur = (b - a) / SR
                 if dur + PAD <= slot or speed >= MAX_SPEED:
@@ -250,7 +268,7 @@ def main():
     sf.write(os.path.splitext(args.out)[0] + "_raw.wav", raw_track.astype(np.float32), SR)
     sf.write(args.out, track.astype(np.float32), SR)
     with open(os.path.splitext(args.out)[0] + ".json", "w", encoding="utf-8") as f:
-        json.dump({"voice": args.voice, "lines": meta}, f, ensure_ascii=False, indent=2)
+        json.dump({"voice": args.voice, "pitch": args.pitch, "speed": args.speed, "lines": meta}, f, ensure_ascii=False, indent=2)
     print("나레이션 저장:", args.out)
 
 
