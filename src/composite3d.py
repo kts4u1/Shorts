@@ -21,6 +21,7 @@ import render as R  # noqa: E402
 from timeline import W, H, FPS, DURATION  # noqa: E402
 
 FRAMES = None
+OVERLAY = None   # --overlay 로 지정한 모듈 (overlay(ctx, t, anchors), camera_zoom(t))
 
 
 def load_frame(idx):
@@ -79,12 +80,16 @@ def composite(idx):
     base, _keep, anchors = load_frame(idx)
     out = cairo.ImageSurface(cairo.FORMAT_ARGB32, W, H)
     ctx = cairo.Context(out)
-    z = R.camera_zoom(t)
+    z = OVERLAY.camera_zoom(t) if OVERLAY is not None else R.camera_zoom(t)
     ctx.translate(W / 2, H / 2)
     ctx.scale(z, z)
     ctx.translate(-W / 2, -H / 2)
     ctx.set_source_surface(base, 0, 0)
     ctx.paint()
+    if OVERLAY is not None:
+        OVERLAY.overlay(ctx, t, anchors)
+        out.flush()
+        return out
 
     st = R.octo_state(t)
     R.draw_swim_fx(ctx, st, t)
@@ -109,9 +114,14 @@ def frame_bytes(idx):
     return bytes(composite(idx).get_data())
 
 
-def init(frames):
-    global FRAMES
+def init(frames, overlay=None):
+    global FRAMES, OVERLAY
     FRAMES = frames
+    if overlay:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("shorts_overlay", os.path.abspath(overlay))
+        OVERLAY = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(OVERLAY)
 
 
 def main():
@@ -122,8 +132,9 @@ def main():
     ap.add_argument("--preview", default=None, help="프레임 번호 목록(쉼표) -> PNG")
     ap.add_argument("--preview-dir", default="build/preview3d")
     ap.add_argument("--workers", type=int, default=os.cpu_count() or 2)
+    ap.add_argument("--overlay", default=None, help="자막/UI 오버레이 모듈 경로 (기본: 문어 편)")
     args = ap.parse_args()
-    init(args.frames)
+    init(args.frames, args.overlay)
 
     if args.preview:
         os.makedirs(args.preview_dir, exist_ok=True)
@@ -145,7 +156,7 @@ def main():
         cmd += ["-c:a", "aac", "-b:a", "192k", "-shortest"]
     cmd += ["-movflags", "+faststart", args.out]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-    with Pool(args.workers, initializer=init, initargs=(args.frames,)) as pool:
+    with Pool(args.workers, initializer=init, initargs=(args.frames, args.overlay)) as pool:
         for i, data in enumerate(pool.imap(frame_bytes, range(n), chunksize=4)):
             proc.stdin.write(data)
             if i % 90 == 0:

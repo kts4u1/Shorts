@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """배경음악 + 효과음 합성 (numpy 만 사용, 저작권 걱정 없는 자체 제작 사운드).
 
-사용법: python3 src/audio.py build/audio.wav [--narration build/narration.wav]
+사용법: python3 src/audio.py build/audio.wav [--narration build/narration.wav] [--timeline otter/timeline.py]
 """
 import os
 import sys
@@ -10,7 +10,11 @@ import wave
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from timeline import DURATION, SFX, SWIM_START, SWIM_END, ecg_peak_times, jet_times  # noqa: E402
+import tl  # noqa: E402  (타임라인 선택)
+
+T = tl.TL
+DURATION, SFX = T.DURATION, T.SFX
+KEY = getattr(T, "MUSIC_KEY", 0)   # 배경음악 조옮김(반음)
 
 SR = 44100
 N = int(SR * DURATION)
@@ -192,6 +196,25 @@ def sfx_click():
     return (n * 0.4 + np.sin(2 * np.pi * 2200 * t) * np.exp(-t / 0.01)) * 0.8
 
 
+def sfx_knock(f=900):
+    """조개를 돌에 두드리는 '톡' 소리."""
+    t = tt(0.2)
+    y = np.sin(2 * np.pi * f * t) * np.exp(-t / 0.03) + 0.45 * np.sin(2 * np.pi * f * 2.4 * t) * np.exp(-t / 0.012)
+    n = np.diff(rng.standard_normal(len(t) + 1)) * np.exp(-t / 0.004) * 0.35
+    return (y + n) * attack(t, 0.0005)
+
+
+def sfx_splash(dur=0.7):
+    """물 찰방 소리."""
+    t = tt(dur)
+    n = rng.standard_normal(len(t))
+    y = onepole_lp(n, 300 + 3200 * np.exp(-t / 0.18)) * (1 - np.exp(-t / 0.008)) * np.exp(-t / 0.2) * 1.6
+    out = y.copy()
+    b = sfx_bubbles(5)[: len(out)] * 0.6
+    out[: len(b)] += b
+    return out
+
+
 SFX_FUNCS = {
     "pop": (lambda p: sfx_pop(p.get("f", 700)), 0.42),
     "boing": (lambda p: sfx_boing(), 0.45),
@@ -203,6 +226,8 @@ SFX_FUNCS = {
     "flatline": (lambda p: sfx_flatline(), 0.16),
     "thud": (lambda p: sfx_thud(), 0.55),
     "click": (lambda p: sfx_click(), 0.5),
+    "knock": (lambda p: sfx_knock(p.get("f", 900)), 0.5),
+    "splash": (lambda p: sfx_splash(), 0.35),
 }
 
 
@@ -234,15 +259,15 @@ def compose():
         notes = CHORDS[ch]
         last = b == len(PROG) - 1
         # 패드
-        place(music, t0, pad([midi(m - 12) for m in notes[:3]], BAR + 0.3), gain=0.05)
+        place(music, t0, pad([midi(m - 12 + KEY) for m in notes[:3]], BAR + 0.3), gain=0.05)
         # 마림바 아르페지오
         for k, idx in enumerate(arp_pat):
             if last and k >= 4:
                 break
-            place(music, t0 + k * BEAT / 2, marimba(midi(notes[idx])), pan=(-0.35 if k % 2 else 0.35),
+            place(music, t0 + k * BEAT / 2, marimba(midi(notes[idx] + KEY)), pan=(-0.35 if k % 2 else 0.35),
                   gain=0.13 if k % 2 == 0 else 0.10)
         # 베이스
-        root = midi(BASS_ROOT[ch])
+        root = midi(BASS_ROOT[ch] + KEY)
         for off, g in ((0.0, 0.32), (1.5 * BEAT, 0.22), (2 * BEAT, 0.30)):
             place(music, t0 + off, bass(root), gain=g)
         # 드럼
@@ -257,15 +282,17 @@ def compose():
         # 리드 멜로디 (두 번째 마디부터)
         if b >= 1 and not last:
             for k, m in enumerate(MELODY[ch]):
-                place(music, t0 + k * BEAT, pluck(midi(m)), gain=0.085)
+                place(music, t0 + k * BEAT, pluck(midi(m + KEY)), gain=0.085)
         if last:
             for m in notes + [notes[0] + 12]:
-                place(music, t0 + 2 * BEAT, marimba(midi(m), 1.2), gain=0.08)
-            place(music, t0 + 2 * BEAT, pluck(midi(72), 1.0), gain=0.09)
+                place(music, t0 + 2 * BEAT, marimba(midi(m + KEY), 1.2), gain=0.08)
+            place(music, t0 + 2 * BEAT, pluck(midi(72 + KEY), 1.0), gain=0.09)
     # 심장이 멈추는 구간에서 음악을 살짝 줄여 긴장감
     tline = np.arange(N) / SR
-    dip = np.clip((tline - SWIM_START) / 0.1, 0, 1) * np.clip((SWIM_END + 0.15 - tline) / 0.2, 0, 1)
-    gain = 1 - 0.55 * dip
+    gain = np.ones(N)
+    if hasattr(T, "SWIM_START"):
+        dip = np.clip((tline - T.SWIM_START) / 0.1, 0, 1) * np.clip((T.SWIM_END + 0.15 - tline) / 0.2, 0, 1)
+        gain = 1 - 0.55 * dip
     gain *= np.clip((DURATION - tline) / 0.6, 0, 1)
     music *= gain[:, None]
     return music
@@ -276,10 +303,12 @@ def make_sfx():
     for t0, kind, params in SFX:
         fn, g = SFX_FUNCS[kind]
         place(fx, t0, fn(params), gain=g * params.get("g", 1.0))
-    for tp in ecg_peak_times():
-        place(fx, tp, sfx_beep(), gain=0.11)
-    for tj in jet_times():
-        place(fx, tj - 0.05, sfx_bubbles(6), gain=0.3)
+    if hasattr(T, "ecg_peak_times"):
+        for tp in T.ecg_peak_times():
+            place(fx, tp, sfx_beep(), gain=0.11)
+    if hasattr(T, "jet_times"):
+        for tj in T.jet_times():
+            place(fx, tj - 0.05, sfx_bubbles(6), gain=0.3)
     return fx
 
 

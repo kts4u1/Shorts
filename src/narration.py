@@ -25,6 +25,7 @@ import numpy as np
 import soundfile as sf
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import tl  # noqa: E402,F401  (타임라인 선택: --timeline 경로)
 from timeline import DURATION, NARRATION  # noqa: E402
 
 SR = 44100
@@ -83,6 +84,24 @@ def dropouts(x):
 
 # ---------------------------------------------------------------- 음성 인식 검증
 _ASR = None
+_DIG = "영일이삼사오육칠팔구"
+
+
+def _chunk(n):
+    out = ""
+    for v, u in ((1000, "천"), (100, "백"), (10, "십"), (1, "")):
+        d = n // v % 10
+        if d:
+            out += ("" if d == 1 and u else _DIG[d]) + u
+    return out
+
+
+def sino(n):
+    """정수를 한자어 수 읽기로 (예: 150000 -> 십오만, 1 -> 일)."""
+    if n == 0:
+        return "영"
+    man, rest = divmod(n, 10000)
+    return (("" if man == 1 else _chunk(man)) + "만" if man else "") + (_chunk(rest) if rest else "")
 
 
 def asr_score(seg, text):
@@ -94,8 +113,8 @@ def asr_score(seg, text):
     idx = np.linspace(0, len(seg) - 1, int(len(seg) * 16000 / SR)).astype(int)
     segs, _ = _ASR.transcribe(seg[idx].astype(np.float32), language="ko", beam_size=5)
     hyp = "".join(x.text for x in segs)
-    for k, v in {"3개": "세개", "2개": "두개", "1개": "한개", "3분의 2": "삼분의이", "3분의2": "삼분의이"}.items():
-        hyp = hyp.replace(k, v)
+    hyp = re.sub(r"([1-4])\s*개", lambda m: "한두세네"[int(m.group(1)) - 1] + "개", hyp)
+    hyp = re.sub(r"\d[\d,]*", lambda m: sino(int(m.group().replace(",", ""))), hyp)
 
     def norm(x):
         return re.sub(r"[^가-힣]", "", x).replace("때는", "땐").replace("네요", "내요")

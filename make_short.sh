@@ -1,26 +1,44 @@
 #!/usr/bin/env bash
-# 쇼츠 영상 전체 빌드
-#   ./make_short.sh        2D + 3D 모두
-#   ./make_short.sh 2d     2D 만
-#   ./make_short.sh 3d     3D 만
+# 쇼츠 영상 빌드
+#   ./make_short.sh          전부 (문어 2D + 문어 3D + 해달 3D)
+#   ./make_short.sh 2d       문어 편 2D
+#   ./make_short.sh 3d       문어 편 3D
+#   ./make_short.sh otter    해달 편 3D
 # 필요: python3, node 18+, ffmpeg, Chromium(Playwright), 나눔폰트(fonts-nanum), pip install -r requirements.txt
 set -euo pipefail
 cd "$(dirname "$0")"
 what="${1:-all}"
 
-# 1) 나레이션(TTS) + 음악/효과음 믹스
-[ -f build/narration.wav ] || python3 src/narration.py --voice F2 --out build/narration.wav
-python3 src/audio.py build/audio_vo.wav --narration build/narration.wav
+octopus_audio() {
+  [ -f build/narration.wav ] || python3 src/narration.py --voice F2 --out build/narration.wav
+  python3 src/audio.py build/audio_vo.wav --narration build/narration.wav
+}
 
-# 2) 2D 버전
+if [ "$what" = all ] || [ "$what" = 2d ] || [ "$what" = 3d ]; then
+  octopus_audio
+fi
+
+# 문어 편 2D
 if [ "$what" = all ] || [ "$what" = 2d ]; then
   python3 src/render.py --audio build/audio_vo.wav --out output/octopus_short_2d_voice.mp4
 fi
 
-# 3) 3D 버전: 상태 덤프 -> three.js 렌더 -> 자막 합성
+# 문어 편 3D: 상태 덤프 -> three.js 렌더 -> 자막 합성
 if [ "$what" = all ] || [ "$what" = 3d ]; then
   (cd 3d && npm install --silent)
   python3 src/scene3d_state.py build/states3d.json
   node 3d/render3d.cjs --states build/states3d.json --out build/frames3d --workers 3
   python3 src/composite3d.py --frames build/frames3d --audio build/audio_vo.wav --out output/octopus_short_3d.mp4
+fi
+
+# 해달 편 3D
+if [ "$what" = all ] || [ "$what" = otter ]; then
+  mkdir -p build/otter
+  [ -f build/otter/narration.wav ] || python3 src/narration.py --timeline otter/timeline.py --out build/otter/narration.wav
+  python3 src/audio.py build/otter/audio.wav --narration build/otter/narration.wav --timeline otter/timeline.py
+  (cd 3d && npm install --silent)
+  python3 otter/states.py build/otter/states.json
+  node 3d/render3d.cjs --root otter --states build/otter/states.json --out build/otter/frames --workers 3
+  python3 src/composite3d.py --frames build/otter/frames --overlay otter/overlay.py \
+    --audio build/otter/audio.wav --out output/otter_short_3d.mp4
 fi

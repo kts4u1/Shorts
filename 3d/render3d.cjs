@@ -1,5 +1,5 @@
 // three.js 장면을 헤드리스 Chromium(SwiftShader WebGL)으로 프레임 단위 렌더링.
-//   node 3d/render3d.cjs --states build/states3d.json --out build/frames3d [--workers 3] [--png]
+//   node 3d/render3d.cjs --states build/states3d.json --out build/frames3d [--workers 3] [--png] [--root otter]
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
@@ -8,8 +8,8 @@ const { spawn } = require('child_process');
 const args = process.argv.slice(2);
 const opt = (name, def) => { const i = args.indexOf('--' + name); return i >= 0 ? args[i + 1] : def; };
 const flag = (name) => args.includes('--' + name);
-const ROOT = __dirname;
-const THREE_DIR = path.join(ROOT, 'node_modules', 'three');
+const ROOT = path.resolve(opt('root', __dirname));   // index.html / scene.js 가 있는 폴더
+const THREE_DIR = path.join(__dirname, 'node_modules', 'three');
 
 async function renderPart(states, outDir, part, of, png) {
   const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -54,7 +54,7 @@ async function renderPart(states, outDir, part, of, png) {
   }
   const procs = [];
   for (let k = 0; k < workers; k++) {
-    const a = [__filename, '--states', statesPath, '--out', outDir, '--part', String(k), '--of', String(workers)];
+    const a = [__filename, '--states', statesPath, '--out', outDir, '--part', String(k), '--of', String(workers), '--root', ROOT];
     if (png) a.push('--png');
     const p = spawn(process.execPath, a, { stdio: 'inherit' });
     procs.push(new Promise((res, rej) => p.on('exit', (c) => (c === 0 ? res() : rej(new Error('worker ' + k + ' exit ' + c))))));

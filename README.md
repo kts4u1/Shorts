@@ -1,15 +1,30 @@
-# Shorts 테스트: 문어의 놀라운 비밀 4가지 🐙
+# Shorts: 신기한 바다 상식 🐙🦦
 
-유튜브 쇼츠용 **30초 세로형(1080×1920, 30fps)** 테스트 영상입니다.
+유튜브 쇼츠용 **30초 세로형(1080×1920, 30fps)** 영상 시리즈입니다.
 그림·애니메이션·음악·효과음·나레이션 모두 코드와 오픈 모델로 직접 생성했습니다.
 
 | 파일 | 내용 |
 |---|---|
-| [`output/octopus_short_2d_voice.mp4`](output/octopus_short_2d_voice.mp4) | **2D 애니메이션 + 나레이션** |
-| [`output/octopus_short_3d.mp4`](output/octopus_short_3d.mp4) | **3D 애니메이션 + 나레이션** |
-| [`output/octopus_short.mp4`](output/octopus_short.mp4) | 2D 애니메이션 (나레이션 없는 첫 버전) |
+| [`output/otter_short_3d.mp4`](output/otter_short_3d.mp4) | **2편 해달 — 3D + 나레이션** |
+| [`output/octopus_short_3d.mp4`](output/octopus_short_3d.mp4) | 1편 문어 — 3D + 나레이션 |
+| [`output/octopus_short_2d_voice.mp4`](output/octopus_short_2d_voice.mp4) | 1편 문어 — 2D + 나레이션 |
+| [`output/octopus_short.mp4`](output/octopus_short.mp4) | 1편 문어 — 2D (나레이션 없는 첫 버전) |
 
-## 구성 (30초)
+## 2편: 해달 (30초)
+
+| 구간 | 내용 | 나레이션 |
+|---|---|---|
+| 0.0–3.6s | 훅 | "해달은 왜 손을 잡고 잘까요?" |
+| 3.6–10.2s | 사실 1: 손잡고 잠 | "자다가 떠내려가지 않으려고요! 해초를 몸에 감고 자기도 해요." |
+| 10.2–16.6s | 사실 2: 가장 빽빽한 털 | "털이 세상에서 가장 빽빽해요! 일 제곱센티미터에 최대 십오만 가닥이나 돼요." |
+| 16.6–22.6s | 사실 3: 겨드랑이 주머니 | "겨드랑이에는 비밀 주머니가 있어요. 제일 좋아하는 돌을 넣고 다니죠." |
+| 22.6–27.6s | 사실 4: 도구 사용 | "그 돌로 조개를 깨 먹어요! 도구를 쓸 줄 아는 똑똑한 동물이에요." |
+| 27.6–30.0s | 아웃트로 | "귀엽죠? 구독하고 또 만나요!" |
+
+- 장면: 수면 위를 내려다보는 3D (물결치는 바다, 하늘 반사, 해달 두 마리, 해초, 털 1㎠ 확대 모형, 돌, 조개)
+- 파일: `otter/timeline.py`(타이밍·대사·효과음·연출 큐), `otter/scene.js`(3D), `otter/overlay.py`(자막/UI), `otter/states.py`
+
+## 1편: 문어 (30초)
 
 | 구간 | 내용 | 나레이션 |
 |---|---|---|
@@ -34,14 +49,15 @@
   - 후처리: 날카로운 대역(2.5~4.5kHz, `--presence-db`)과 고역(`--shelf-db`)을 살짝만 줄이고 치찰음(ㅅ·ㅆ·ㅊ)을 동적으로 감소
     (너무 깎으면 목소리가 둔하고 나이 들어 들리므로 약하게)
 - **음악/효과음:** `src/audio.py` — numpy 로 합성, 나레이션이 나올 때 음악·효과음을 자동으로 줄임(더킹), 대사 첫 음절 구간은 효과음을 추가로 줄임, 찌그러짐 없는 리미터로 마무리(약 -15 LUFS)
-- **공용 타임라인:** `src/timeline.py` — 장면, 나레이션, 효과음 타이밍
+- **타임라인:** `src/timeline.py`(문어 편), `otter/timeline.py`(해달 편) — 장면, 나레이션, 효과음 타이밍.
+  `narration.py`/`audio.py` 에 `--timeline otter/timeline.py` 를 주면 해달 편으로 동작
 
 ## 다시 만들기
 
 ```bash
 sudo apt-get install -y ffmpeg fonts-nanum
 pip install -r requirements.txt
-./make_short.sh          # 2D + 3D (2d / 3d 인자로 하나만 가능)
+./make_short.sh          # 전부 (2d / 3d / otter 인자로 하나만 가능)
 ```
 
 다른 목소리로 바꾸기 (F1–F5 여성, M1–M5 남성, 섞기 가능):
@@ -63,3 +79,11 @@ python3 src/render.py --preview 2.5,7.5,18.3 --preview-dir build/preview
   문어는 심장이 3개, 피는 파란색! 헤엄칠 땐 심장 하나가 멈추고, 뇌세포의 2/3는 다리에 있어요.
   더 신기한 바다 이야기가 궁금하다면 구독!
 - **해시태그:** #shorts #문어 #바다상식 #동물상식 #신기한사실
+
+해달 편:
+
+- **제목:** 해달이 손잡고 자는 이유 🦦 알면 더 귀여운 해달의 비밀 #shorts
+- **설명:**
+  해달은 떠내려가지 않으려고 손을 잡고 자요! 털은 1㎠에 최대 15만 가닥, 겨드랑이 주머니엔 최애 돌,
+  그 돌로 조개를 깨 먹는 똑똑한 동물이에요. 더 신기한 바다 이야기가 궁금하다면 구독!
+- **해시태그:** #shorts #해달 #바다상식 #동물상식 #귀여운동물
