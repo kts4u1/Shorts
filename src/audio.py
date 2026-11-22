@@ -383,8 +383,8 @@ def main():
         active = env > 0.5
         voice_rms = np.sqrt(np.mean(voice[active] ** 2))
         bed_rms = np.sqrt(np.mean(music ** 2))
-        # 말이 없을 때 음악은 목소리보다 약 9dB 작게, 말할 때는 추가로 약 6dB 더 줄임
-        g = voice_rms * 10 ** (-9 / 20) / bed_rms
+        # 말이 없을 때 음악은 목소리보다 약 8dB 작게, 말할 때는 추가로 약 6dB 더 줄임
+        g = voice_rms * 10 ** (-8 / 20) / bed_rms
         music *= g * (1 - 0.5 * env)[:, None]
         fx *= g * (1 - 0.65 * env)[:, None]
         # 대사 첫 음절이 효과음에 묻히지 않도록 말 시작 직후 0.3초는 효과음을 더 줄임
@@ -401,7 +401,7 @@ def main():
             protect = np.convolve(protect, np.ones(ramp) / ramp, mode="same")
             fx *= (1 - 0.85 * protect)[:, None]
         mixd = music + fx + voice[:, None]
-        mixd *= 0.14 / voice_rms           # 목소리 평균 레벨 약 -17dBFS
+        mixd *= 0.125 / voice_rms          # 목소리 평균 레벨 약 -18dBFS
     else:
         mixd = (music + fx) * (0.6 / np.max(np.abs(music + fx)))
     mixd = limiter(mixd)

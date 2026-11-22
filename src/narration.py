@@ -148,7 +148,7 @@ def istft(X, win, total, n=1024, hop=256):
     return out[n:-n]
 
 
-def soften(x, presence_db=-2.5, shelf_db=-5.0, warmth_db=1.5):
+def soften(x, presence_db=-2.5, shelf_db=-5.0, warmth_db=1.5, deess_thresh=0.22, deess_floor=0.4):
     """날카로운 느낌 완화: 저역 정리, 2.5~4.5kHz(쏘는 대역) 낮춤, 6kHz 이상 완만히 감쇠, 치찰음 동적 감소."""
     n, hop = 1024, 256
     X, win, total = stft(x, n, hop)
@@ -160,7 +160,7 @@ def soften(x, presence_db=-2.5, shelf_db=-5.0, warmth_db=1.5):
     eq = np.ones_like(f)
     eq *= 1 / (1 + (80 / np.maximum(f, 1)) ** 4)                       # 80Hz 이하 정리
     eq *= db(warmth_db * np.exp(-((lf - np.log2(250)) / 0.8) ** 2))     # 저음 따뜻함
-    eq *= db(presence_db * np.exp(-((lf - np.log2(3300)) / 0.6) ** 2))  # 쏘는 대역
+    eq *= db(presence_db * np.exp(-((lf - np.log2(3000)) / 0.85) ** 2))  # 쏘는 대역 (2~4.5kHz 넓게)
     eq *= db(shelf_db / (1 + np.exp(-(lf - np.log2(6500)) / 0.25)))     # 고역 셸빙
     X *= eq[None, :]
     # 치찰음(ㅅ,ㅆ,ㅊ 등) 동적 감소
@@ -168,10 +168,33 @@ def soften(x, presence_db=-2.5, shelf_db=-5.0, warmth_db=1.5):
     e_hf = np.sum(np.abs(X[:, hf]) ** 2, axis=1)
     e_all = np.sum(np.abs(X) ** 2, axis=1) + 1e-12
     ratio = e_hf / e_all
-    g = np.clip((0.22 / np.maximum(ratio, 1e-6)) ** 0.6, 0.4, 1.0)
+    g = np.clip((deess_thresh / np.maximum(ratio, 1e-6)) ** 0.6, deess_floor, 1.0)
     g = np.convolve(g, np.ones(5) / 5, mode="same")
     X[:, hf] *= g[:, None]
     return istft(X, win, total, n, hop)
+
+
+def transient_soften(x, amount=0.5):
+    """소리가 튀어 오르는 순간(빠른 포락선 > 느린 포락선)만 살짝 줄여 말소리를 둥글게.
+    전체를 누르는 압축과 달리 모음/자음 비율(음색)은 바꾸지 않는다."""
+    if amount <= 0:
+        return x
+    hop = 44
+    n = len(x) // hop
+    e = np.abs(x[: n * hop]).reshape(n, hop).max(axis=1) + 1e-9
+
+    def follow(env, att, rel):
+        out = np.empty_like(env)
+        cur = env[0]
+        ca, cr = np.exp(-1 / (att * 1000)), np.exp(-1 / (rel * 1000))
+        for i, v in enumerate(env):
+            cur = v + (cur - v) * (ca if v > cur else cr)
+            out[i] = cur
+        return out
+    fast, slow = follow(e, 0.001, 0.02), follow(e, 0.03, 0.12)
+    g = np.where(fast > slow, (slow / fast) ** amount, 1.0)
+    g = np.convolve(g, np.ones(5) / 5, mode="same")
+    return x * np.interp(np.arange(len(x)), np.arange(n) * hop + hop / 2, g)
 
 
 # ---------------------------------------------------------------- 목소리
@@ -208,14 +231,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--voice", default="F2", help="예: F2, M4, F2:0.75+F5:0.25")
     ap.add_argument("--out", default="build/narration.wav")
-    ap.add_argument("--speed", type=float, default=1.05, help="최종 말하기 속도")
+    ap.add_argument("--speed", type=float, default=1.0, help="최종 말하기 속도")
     ap.add_argument("--steps", type=int, default=32)
     ap.add_argument("--seed", type=int, default=2024)
     ap.add_argument("--tries", type=int, default=8)
     ap.add_argument("--pitch", type=float, default=2.0, help="음높이·음색을 올릴 반음 수 (젊은 느낌)")
-    ap.add_argument("--presence-db", type=float, default=-2.5, help="2.5~4.5kHz 감쇠량(dB)")
-    ap.add_argument("--shelf-db", type=float, default=-1.5, help="6kHz 이상 감쇠량(dB)")
-    ap.add_argument("--warmth-db", type=float, default=0.0, help="250Hz 부근 보정(dB)")
+    ap.add_argument("--presence-db", type=float, default=-5.0, help="2~4.5kHz 감쇠량(dB)")
+    ap.add_argument("--shelf-db", type=float, default=-3.5, help="6kHz 이상 감쇠량(dB)")
+    ap.add_argument("--warmth-db", type=float, default=0.5, help="250Hz 부근 보정(dB)")
+    ap.add_argument("--deess", type=float, default=0.18, help="치찰음 감소 기준 (낮을수록 강함)")
+    ap.add_argument("--soft-attack", type=float, default=0.5, help="튀는 순간 완화 정도 (0이면 끔)")
     ap.add_argument("--no-verify", action="store_true", help="음성 인식 검증 생략")
     args = ap.parse_args()
 
@@ -228,13 +253,15 @@ def main():
     import audio as A
     bed = A.compose().mean(axis=1) * 0.9
     bed_rms = np.sqrt(np.mean(bed ** 2)) + 1e-9
+    fx_bed = A.make_sfx().mean(axis=1)   # 효과음도 최종 영상과 같은 조건으로
 
     def finish(seg):
         seg = seg / (np.max(np.abs(seg)) + 1e-9) * 0.9
         fi, fo = int(0.02 * SR), int(0.06 * SR)
         seg[:fi] *= np.linspace(0, 1, fi) ** 2
         seg[-fo:] *= np.linspace(1, 0, fo) ** 2
-        proc = soften(seg, args.presence_db, args.shelf_db, args.warmth_db)
+        proc = soften(seg, args.presence_db, args.shelf_db, args.warmth_db, args.deess, 0.35)
+        proc = transient_soften(proc, args.soft_attack)
         return seg, proc / (np.max(np.abs(proc)) + 1e-9) * 0.9
 
     ratio = 2 ** (args.pitch / 12)
@@ -264,9 +291,13 @@ def main():
                 err, hyp = 0.0, ""
             else:
                 act = proc[np.abs(proc) > 0.01]
-                g = np.sqrt(np.mean(act ** 2)) * 10 ** (-9 / 20) / bed_rms * 0.5
+                # audio.py 의 믹스와 같은 비율: 음악은 목소리보다 8dB 작게 + 말하는 동안 절반,
+                # 효과음은 말하는 동안 35%, 대사 시작 0.4초는 그중 15%
+                g = np.sqrt(np.mean(act ** 2)) * 10 ** (-8 / 20) / bed_rms
                 music = bed[i0:i0 + len(proc)]
-                err, hyp = asr_score(proc[:len(music)] + music * g, text)
+                fx = fx_bed[i0:i0 + len(music)] * 0.35
+                fx[: int(0.4 * SR)] *= 0.15
+                err, hyp = asr_score(proc[:len(music)] + music * g * 0.5 + fx * g, text)
             score = err * 10 + ab * 1.0 + dr * 0.6 + max(0.0, dur + PAD - slot) * 5
             if best is None or score < best[0]:
                 best = (score, seg, proc, speed, err, hyp, ab, dr)
