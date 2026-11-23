@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # 쇼츠 영상 빌드
-#   ./make_short.sh          전부 (문어 2D + 문어 3D + 해달 3D)
+#   ./make_short.sh          전부 (문어 2D + 문어 3D + 해달 3D + 해파리 3D)
 #   ./make_short.sh 2d       문어 편 2D
 #   ./make_short.sh 3d       문어 편 3D
 #   ./make_short.sh otter    해달 편 3D
+#   ./make_short.sh jelly    해파리 편 3D
 # 필요: python3, node 18+, ffmpeg, Chromium(Playwright), 나눔폰트(fonts-nanum), pip install -r requirements.txt
 set -euo pipefail
 cd "$(dirname "$0")"
 what="${1:-all}"
 
 octopus_audio() {
-  [ -f build/narration.wav ] || python3 src/narration.py --voice F2 --out build/narration.wav
+  [ -f build/narration.wav ] || python3 src/narration.py --out build/narration.wav
   python3 src/audio.py build/audio_vo.wav --narration build/narration.wav
 }
 
@@ -41,4 +42,16 @@ if [ "$what" = all ] || [ "$what" = otter ]; then
   node 3d/render3d.cjs --root otter --states build/otter/states.json --out build/otter/frames --workers 3
   python3 src/composite3d.py --frames build/otter/frames --overlay otter/overlay.py \
     --audio build/otter/audio.wav --out output/otter_short_3d.mp4
+fi
+
+# 해파리 편 3D
+if [ "$what" = all ] || [ "$what" = jelly ]; then
+  mkdir -p build/jelly
+  [ -f build/jelly/narration.wav ] || python3 src/narration.py --timeline jelly/timeline.py --out build/jelly/narration.wav
+  python3 src/audio.py build/jelly/audio.wav --narration build/jelly/narration.wav --timeline jelly/timeline.py
+  (cd 3d && npm install --silent)
+  python3 jelly/states.py build/jelly/states.json
+  node 3d/render3d.cjs --root jelly --states build/jelly/states.json --out build/jelly/frames --workers 3
+  python3 src/composite3d.py --frames build/jelly/frames --overlay jelly/overlay.py \
+    --audio build/jelly/audio.wav --out output/jelly_short_3d.mp4
 fi

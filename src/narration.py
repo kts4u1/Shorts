@@ -113,11 +113,13 @@ def asr_score(seg, text):
     idx = np.linspace(0, len(seg) - 1, int(len(seg) * 16000 / SR)).astype(int)
     segs, _ = _ASR.transcribe(seg[idx].astype(np.float32), language="ko", beam_size=5)
     hyp = "".join(x.text for x in segs)
+    hyp = hyp.replace("%", "퍼센트")
     hyp = re.sub(r"([1-4])\s*개", lambda m: "한두세네"[int(m.group(1)) - 1] + "개", hyp)
     hyp = re.sub(r"\d[\d,]*", lambda m: sino(int(m.group().replace(",", ""))), hyp)
 
     def norm(x):
-        return re.sub(r"[^가-힣]", "", x).replace("때는", "땐").replace("네요", "내요")
+        # 소리가 같은 표기(동음)는 같은 것으로 본다
+        return re.sub(r"[^가-힣]", "", x).replace("때는", "땐").replace("네요", "내요").replace("해팔이", "해파리")
     r, h = norm(text), norm(hyp)
     d = list(range(len(h) + 1))
     for i in range(1, len(r) + 1):
