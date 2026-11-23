@@ -231,16 +231,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--voice", default="F2", help="예: F2, M4, F2:0.75+F5:0.25")
     ap.add_argument("--out", default="build/narration.wav")
-    ap.add_argument("--speed", type=float, default=1.0, help="최종 말하기 속도")
+    ap.add_argument("--speed", type=float, default=0.97, help="최종 말하기 속도")
     ap.add_argument("--steps", type=int, default=32)
     ap.add_argument("--seed", type=int, default=2024)
     ap.add_argument("--tries", type=int, default=8)
-    ap.add_argument("--pitch", type=float, default=2.0, help="음높이·음색을 올릴 반음 수 (젊은 느낌)")
-    ap.add_argument("--presence-db", type=float, default=-5.0, help="2~4.5kHz 감쇠량(dB)")
-    ap.add_argument("--shelf-db", type=float, default=-3.5, help="6kHz 이상 감쇠량(dB)")
-    ap.add_argument("--warmth-db", type=float, default=0.5, help="250Hz 부근 보정(dB)")
-    ap.add_argument("--deess", type=float, default=0.18, help="치찰음 감소 기준 (낮을수록 강함)")
-    ap.add_argument("--soft-attack", type=float, default=0.5, help="튀는 순간 완화 정도 (0이면 끔)")
+    ap.add_argument("--pitch", type=float, default=1.5, help="음높이·음색을 올릴 반음 수 (젊은 느낌)")
+    ap.add_argument("--presence-db", type=float, default=-6.5, help="2~4.5kHz 감쇠량(dB)")
+    ap.add_argument("--shelf-db", type=float, default=-4.5, help="6kHz 이상 감쇠량(dB)")
+    ap.add_argument("--warmth-db", type=float, default=0.8, help="250Hz 부근 보정(dB)")
+    ap.add_argument("--deess", type=float, default=0.16, help="치찰음 감소 기준 (낮을수록 강함)")
+    ap.add_argument("--deess-floor", type=float, default=0.3, help="치찰음 최대 감소 (작을수록 강함)")
+    ap.add_argument("--soft-attack", type=float, default=0.6, help="튀는 순간 완화 정도 (0이면 끔)")
     ap.add_argument("--no-verify", action="store_true", help="음성 인식 검증 생략")
     args = ap.parse_args()
 
@@ -260,7 +261,7 @@ def main():
         fi, fo = int(0.02 * SR), int(0.06 * SR)
         seg[:fi] *= np.linspace(0, 1, fi) ** 2
         seg[-fo:] *= np.linspace(1, 0, fo) ** 2
-        proc = soften(seg, args.presence_db, args.shelf_db, args.warmth_db, args.deess, 0.35)
+        proc = soften(seg, args.presence_db, args.shelf_db, args.warmth_db, args.deess, args.deess_floor)
         proc = transient_soften(proc, args.soft_attack)
         return seg, proc / (np.max(np.abs(proc)) + 1e-9) * 0.9
 
