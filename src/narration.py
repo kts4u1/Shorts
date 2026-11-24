@@ -114,12 +114,21 @@ def asr_score(seg, text):
     segs, _ = _ASR.transcribe(seg[idx].astype(np.float32), language="ko", beam_size=5)
     hyp = "".join(x.text for x in segs)
     hyp = hyp.replace("%", "퍼센트")
-    hyp = re.sub(r"([1-4])\s*개", lambda m: "한두세네"[int(m.group(1)) - 1] + "개", hyp)
+    hyp = re.sub(r"(\d)\s*m(?![a-zA-Z])", r"\1미터", hyp)
+    hyp = re.sub(r"(\d+)\.(\d+)", lambda m: sino(int(m.group(1))) + "점" + "".join(_DIG[int(d)] for d in m.group(2)), hyp)
+    hyp = re.sub(r"([1-4])\s*(개|시간|마리)", lambda m: "한두세네"[int(m.group(1)) - 1] + m.group(2), hyp)
     hyp = re.sub(r"\d[\d,]*", lambda m: sino(int(m.group().replace(",", ""))), hyp)
 
     def norm(x):
-        # 소리가 같은 표기(동음)는 같은 것으로 본다
-        return re.sub(r"[^가-힣]", "", x).replace("때는", "땐").replace("네요", "내요").replace("해팔이", "해파리")
+        # 소리가 같은 표기(동음)는 같은 것으로 본다: ㅐ/ㅔ 합류, 연음 표기 등
+        x = re.sub(r"[^가-힣]", "", x).replace("때는", "땐").replace("해팔이", "해파리").replace("아를", "알을").replace("의", "에")
+        out = []
+        for ch in x:
+            c = ord(ch) - 0xAC00
+            ini, med, fin = c // 588, (c % 588) // 28, c % 28
+            med = {5: 1, 7: 3}.get(med, med)   # ㅔ->ㅐ, ㅖ->ㅒ
+            out.append(chr(0xAC00 + ini * 588 + med * 28 + fin))
+        return "".join(out)
     r, h = norm(text), norm(hyp)
     d = list(range(len(h) + 1))
     for i in range(1, len(r) + 1):

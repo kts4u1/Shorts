@@ -1,15 +1,31 @@
-# Shorts: 신기한 바다 상식 🐙🦦🪼
+# Shorts: 신기한 바다 상식 🐙🦦🪼🐴
 
 유튜브 쇼츠용 **30초 세로형(1080×1920, 30fps)** 영상 시리즈입니다.
 그림·애니메이션·음악·효과음·나레이션 모두 코드와 오픈 모델로 직접 생성했습니다.
 
 | 파일 | 내용 |
 |---|---|
-| [`output/jelly_short_3d.mp4`](output/jelly_short_3d.mp4) | **3편 해파리 — 3D + 나레이션** |
+| [`output/seahorse_short_3d.mp4`](output/seahorse_short_3d.mp4) | **4편 해마 — 3D + 나레이션** |
+| [`output/jelly_short_3d.mp4`](output/jelly_short_3d.mp4) | 3편 해파리 — 3D + 나레이션 |
 | [`output/otter_short_3d.mp4`](output/otter_short_3d.mp4) | 2편 해달 — 3D + 나레이션 |
 | [`output/octopus_short_3d.mp4`](output/octopus_short_3d.mp4) | 1편 문어 — 3D + 나레이션 |
 | [`output/octopus_short_2d_voice.mp4`](output/octopus_short_2d_voice.mp4) | 1편 문어 — 2D + 나레이션 |
 | [`output/octopus_short.mp4`](output/octopus_short.mp4) | 1편 문어 — 2D (나레이션 없는 첫 버전) |
+
+## 4편: 해마 (30초)
+
+| 구간 | 내용 | 나레이션 |
+|---|---|---|
+| 0.0–3.6s | 훅 (해초 속에 숨음) | "아빠가 아기를 낳는 동물이 있다고요?" |
+| 3.6–10.2s | 사실 1: 아빠 배 주머니 | "정답은 해마예요. 엄마가 넣어 준 알을, 아빠가 배 주머니에서 키워요." |
+| 10.2–16.6s | 사실 2: 천 마리 넘게 | "많게는 천 마리 넘게 태어나요. 아빠가 배를 꿈틀거려 아기들을 내보내죠." |
+| 16.6–22.6s | 사실 3: 두 눈을 따로따로 | "해마는 두 눈을 따로따로 움직여요. 한쪽은 위를, 한쪽은 아래를 볼 수 있죠." |
+| 22.6–27.6s | 사실 4: 가장 느린 물고기 | "가장 느린 물고기이기도 해요. 한 시간에 겨우 일 점 오 미터 가요." |
+| 27.6–30.0s | 아웃트로 | "신기하죠? 구독하고 또 만나요." |
+
+- 장면: 햇빛 비치는 해초 숲(물결 빛 무늬), 아빠·엄마 해마, 알, 부푸는 배 주머니, 아기 해마 떼,
+  두 눈 클로즈업(카메라가 다가감), 달팽이에게 추월당하는 느린 헤엄과 속도계
+- 파일: `seahorse/timeline.py`, `seahorse/scene.js`, `seahorse/overlay.py`, `seahorse/states.py`
 
 ## 3편: 해파리 (30초)
 
@@ -66,7 +82,7 @@
   - 후처리: 쏘는 대역(2~4.5kHz, `--presence-db -6.5`)과 고역(`--shelf-db -4.5`)을 줄이고, 치찰음(ㅅ·ㅆ·ㅊ)을 동적으로 감소,
     소리가 튀어 오르는 순간만 살짝 눌러(`--soft-attack`) 말소리를 둥글게 (너무 깎으면 둔하고 나이 들어 들리므로 적당히)
 - **음악/효과음:** `src/audio.py` — numpy 로 합성, 나레이션이 나올 때 음악·효과음을 자동으로 줄임(더킹), 대사 첫 음절 구간은 효과음을 추가로 줄임, 찌그러짐 없는 리미터로 마무리(약 -15 LUFS)
-- **타임라인:** `src/timeline.py`(문어 편), `otter/timeline.py`(해달 편), `jelly/timeline.py`(해파리 편) — 장면, 나레이션, 효과음 타이밍.
+- **타임라인:** `src/timeline.py`(문어 편), `otter/timeline.py`(해달 편), `jelly/timeline.py`(해파리 편), `seahorse/timeline.py`(해마 편) — 장면, 나레이션, 효과음 타이밍.
   `narration.py`/`audio.py` 에 `--timeline otter/timeline.py` 를 주면 해달 편으로 동작
 
 ## 다시 만들기
@@ -74,7 +90,7 @@
 ```bash
 sudo apt-get install -y ffmpeg fonts-nanum
 pip install -r requirements.txt
-./make_short.sh          # 전부 (2d / 3d / otter / jelly 인자로 하나만 가능)
+./make_short.sh          # 전부 (2d / 3d / otter / jelly / seahorse 인자로 하나만 가능)
 ```
 
 다른 목소리로 바꾸기 (F1–F5 여성, M1–M5 남성, 섞기 가능):
@@ -112,3 +128,11 @@ python3 src/render.py --preview 2.5,7.5,18.3 --preview-dir build/preview
   해파리는 뇌·심장·뼈 없이 신경망으로 살아요. 몸의 95%가 물이고, 홍해파리는 늙으면 다시 어려지는
   '불멸의 해파리'! 공룡보다 훨씬 먼저, 5억 년 넘게 바다에 살아왔어요. 더 신기한 바다 이야기가 궁금하다면 구독!
 - **해시태그:** #shorts #해파리 #바다상식 #동물상식 #불멸의해파리
+
+해마 편:
+
+- **제목:** 아빠가 아기를 낳는다고?! 🐴 해마의 놀라운 비밀 #shorts
+- **설명:**
+  해마는 아빠가 배 주머니에서 아기를 낳아요! 많게는 천 마리 넘게 태어나고, 두 눈을 따로따로 움직이며,
+  한 시간에 겨우 1.5m 가는 세상에서 가장 느린 물고기예요. 더 신기한 바다 이야기가 궁금하다면 구독!
+- **해시태그:** #shorts #해마 #바다상식 #동물상식 #아빠가낳아요

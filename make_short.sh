@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # 쇼츠 영상 빌드
-#   ./make_short.sh          전부 (문어 2D + 문어 3D + 해달 3D + 해파리 3D)
+#   ./make_short.sh          전부 (문어 2D + 문어 3D + 해달 3D + 해파리 3D + 해마 3D)
 #   ./make_short.sh 2d       문어 편 2D
 #   ./make_short.sh 3d       문어 편 3D
 #   ./make_short.sh otter    해달 편 3D
 #   ./make_short.sh jelly    해파리 편 3D
+#   ./make_short.sh seahorse 해마 편 3D
 # 필요: python3, node 18+, ffmpeg, Chromium(Playwright), 나눔폰트(fonts-nanum), pip install -r requirements.txt
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -54,4 +55,16 @@ if [ "$what" = all ] || [ "$what" = jelly ]; then
   node 3d/render3d.cjs --root jelly --states build/jelly/states.json --out build/jelly/frames --workers 3
   python3 src/composite3d.py --frames build/jelly/frames --overlay jelly/overlay.py \
     --audio build/jelly/audio.wav --out output/jelly_short_3d.mp4
+fi
+
+# 해마 편 3D
+if [ "$what" = all ] || [ "$what" = seahorse ]; then
+  mkdir -p build/seahorse
+  [ -f build/seahorse/narration.wav ] || python3 src/narration.py --timeline seahorse/timeline.py --out build/seahorse/narration.wav
+  python3 src/audio.py build/seahorse/audio.wav --narration build/seahorse/narration.wav --timeline seahorse/timeline.py
+  (cd 3d && npm install --silent)
+  python3 seahorse/states.py build/seahorse/states.json
+  node 3d/render3d.cjs --root seahorse --states build/seahorse/states.json --out build/seahorse/frames --workers 3
+  python3 src/composite3d.py --frames build/seahorse/frames --overlay seahorse/overlay.py \
+    --audio build/seahorse/audio.wav --out output/seahorse_short_3d.mp4
 fi
