@@ -238,6 +238,64 @@ const moteGeo = new THREE.BufferGeometry(); moteGeo.setAttribute('position', new
 const moteMat = new THREE.PointsMaterial({ size: 0.05, map: dotTex, transparent: true, opacity: 0.6, depthWrite: false });
 scene.add(new THREE.Points(moteGeo, moteMat));
 
+// ------------------------------------------------------------------ 이빨
+// 입 평면 좌표: x 가로, y 위아래(0 = 윗입술), z 바깥(+) 방향. 이빨 메시는 뿌리가 원점.
+const MR = 0.2, MSX = 1.15, TOOTH_R = 0.025, TOOTH_H = 0.074;
+const TEETH_EV = [{ jaw: -1, i: 2 }, { jaw: 1, i: 4 }];    // 빠지는 이빨 (아래턱 3번째, 윗턱 5번째)
+function bladeGeo(rootAtOrigin) {
+  const g = new THREE.ConeGeometry(TOOTH_R, TOOTH_H, 16);
+  g.scale(1, 1, 0.45);                                       // 납작한 칼날 모양
+  if (rootAtOrigin) g.translate(0, TOOTH_H / 2, 0);
+  return g;
+}
+// 앞줄(row 0)/뒷줄(row 1) 자리의 뿌리 위치·방향·크기
+function slotPose(jaw, i, row, open) {
+  const u = i / 6 * 2 - 1;
+  let bx, by, dx, dy;
+  if (jaw > 0) { bx = u * 0.15; by = -0.022; dx = 0; dy = -1; }
+  else {
+    const A = MR * MSX, B = MR * (0.2 + 0.85 * open), a = Math.PI * (1.2 + 0.6 * i / 6);
+    bx = Math.cos(a) * A * 0.92; by = Math.sin(a) * B * 0.92;
+    let nx = -Math.cos(a) / A, ny = -Math.sin(a) / B; const nl = Math.hypot(nx, ny);
+    dx = 0.45 * nx / nl; dy = 0.45 * ny / nl + 0.55; const dl = Math.hypot(dx, dy); dx /= dl; dy /= dl;
+  }
+  const s = 1 - 0.28 * u * u;                                // 입꼬리 쪽은 작게
+  if (row === 1) { bx += dx * 0.042 * s; by += dy * 0.042 * s; }
+  return { x: bx, y: by, z: row ? 0.014 : 0.03, th: Math.atan2(-dx, dy), fold: row ? -0.3 : 0, s: row ? s * 0.7 : s, dx, dy };
+}
+function lerpPose(a, b, k, kb) {
+  return { x: lerp(a.x, b.x, k), y: lerp(a.y, b.y, k), z: lerp(a.z, b.z, k), th: lerp(a.th, b.th, k), fold: lerp(a.fold, b.fold, kb), s: lerp(a.s, b.s, kb) };
+}
+// 시각 t 의 이빨 자세 (null = 안 보임)
+function toothPose(th, t, C, open) {
+  const pose = slotPose(th.jaw, th.i, th.row, open);
+  const k = TEETH_EV.findIndex((e) => e.jaw === th.jaw && e.i === th.i);
+  if (k < 0 || !C.DROP) return pose;
+  const D = C.DROP[k], R = C.REPLACE[k];
+  if (th.row === 0) {
+    if (t < D - 0.55) return pose;
+    if (t < D) {                                             // 흔들흔들 -> 헐거워짐
+      const w = prog(t, D - 0.55, D);
+      pose.th += (0.08 + 0.22 * w) * Math.sin(TAU * 5.45 * (t - D));
+      pose.x += pose.dx * 0.01 * w; pose.y += pose.dy * 0.01 * w;
+      return pose;
+    }
+    // 빠진 뒤: 빈자리. 이 메시는 잠시 뒤 뒷줄 자리에서 새 이빨로 자라남
+    const g = easeOut(prog(t, R + 0.4, R + 1.1));
+    if (g <= 0.01) return null;
+    const back = slotPose(th.jaw, th.i, 1, open); back.s *= g; return back;
+  }
+  if (t < R) return pose;                                    // 뒷줄 -> 앞줄로 쏙
+  const q = prog(t, R, R + 0.42);
+  return lerpPose(pose, slotPose(th.jaw, th.i, 0, open), easeOut(q), easeBack(q, 2.2));
+}
+const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler();
+function toothLocalMatrix(p, sc) {
+  _q.setFromEuler(_e.set(p.fold, 0, p.th, 'ZYX'));
+  return _m4.clone().compose(V(p.x, p.y, p.z), _q.clone(), V(1, 1, 1).multiplyScalar(p.s * sc));
+}
+const teethScale = (open) => smooth(0.3, 0.62, open);
+
 // ------------------------------------------------------------------ 상어
 const SN = 64, SR = 24;
 const RKEYS = [[0, 0.05], [0.08, 0.08], [0.25, 0.22], [0.5, 0.35], [0.7, 0.33], [0.85, 0.25], [0.94, 0.15], [1.0, 0.015]];
@@ -292,17 +350,20 @@ const shark = (() => {
   }
   const smile = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.018, 8, 24, 2.0), dark);
   const smileG = new THREE.Group(); smileG.add(smile); smile.rotation.z = -(Math.PI / 2 + 1.0); head.add(smileG);
-  // 벌린 입 + 이빨
+  // 벌린 입 + 잇몸 + 이빨(앞줄/뒷줄)
   const mouthG = new THREE.Group(); head.add(mouthG);
-  const inner = new THREE.Mesh(new THREE.CircleGeometry(0.17, 32, Math.PI, Math.PI), new THREE.MeshStandardMaterial({ color: '#7a1f35', roughness: 0.6, side: THREE.DoubleSide }));
+  const inner = new THREE.Mesh(new THREE.CircleGeometry(MR, 40, Math.PI, Math.PI), new THREE.MeshStandardMaterial({ color: '#7a1f35', roughness: 0.6, side: THREE.DoubleSide }));
   mouthG.add(inner);
-  const toothMat = new THREE.MeshPhysicalMaterial({ color: '#ffffff', roughness: 0.2, clearcoat: 1, emissive: '#ffffff', emissiveIntensity: 0.25 });
-  const toothGeo = new THREE.ConeGeometry(0.03, 0.09, 10);
+  const gumMat = new THREE.MeshStandardMaterial({ color: '#e46a88', roughness: 0.5, emissive: '#6a1a30', emissiveIntensity: 0.7, side: THREE.DoubleSide });
+  const gumL = new THREE.Mesh(new THREE.RingGeometry(MR * 0.84, MR, 40, 1, Math.PI, Math.PI), gumMat); gumL.position.z = 0.004; inner.add(gumL);
+  const gumU = new THREE.Mesh(new THREE.PlaneGeometry(MR * 2 * MSX, 0.034), gumMat); gumU.position.set(0, -0.017, 0.004); mouthG.add(gumU);
+  const toothMat = new THREE.MeshPhysicalMaterial({ color: '#ffffff', roughness: 0.2, clearcoat: 1, emissive: '#ffffff', emissiveIntensity: 0.3 });
+  const toothGeo = bladeGeo(true);
   const teeth = [];
-  for (const up of [1, -1]) for (let row = 0; row < 3; row++) for (let i = 0; i < 7; i++) {
-    const m = new THREE.Mesh(toothGeo, toothMat); mouthG.add(m); teeth.push({ m, up, row, i });
+  for (const jaw of [1, -1]) for (const row of [0, 1]) for (let i = 0; i < 7; i++) {
+    const m = new THREE.Mesh(toothGeo, toothMat); mouthG.add(m); teeth.push({ m, jaw, row, i });
   }
-  const dropTooth = new THREE.Mesh(toothGeo, toothMat); scene.add(dropTooth);
+  const dropTeeth = TEETH_EV.map(() => { const m = new THREE.Mesh(bladeGeo(false), toothMat); scene.add(m); return m; });
   // 아가미
   const gills = [];
   for (const sz of [1, -1]) for (let k = 0; k < 5; k++) {
@@ -325,7 +386,7 @@ const shark = (() => {
   const rays = [];
   for (let k = 0; k < 14; k++) { const m = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 1, 6), boneMat); skel.add(m); rays.push(m); }
   const xrayMat = new THREE.MeshPhysicalMaterial({ color: '#7fe6ff', transparent: true, opacity: 0.22, roughness: 0.2, depthWrite: false, emissive: '#1d6f8f', emissiveIntensity: 0.6, side: THREE.DoubleSide });
-  return { root, body, geo, skin, finMat, xrayMat, dorsalG, pecG, tailG, head, eyes, closed, smileG, mouthG, inner, teeth, dropTooth, gills, amps, ampMat, skel, verts, skull, jawU, jawL, girdle, rays };
+  return { root, body, geo, skin, finMat, xrayMat, dorsalG, pecG, tailG, head, eyes, closed, smileG, mouthG, inner, teeth, dropTeeth, gills, amps, ampMat, skel, verts, skull, jawU, jawL, girdle, rays };
 })();
 
 // 상어 몸의 중심선 (헤엄칠 때 좌우로 휨)
@@ -375,22 +436,15 @@ function updateShark(P, t) {
   S.smileG.position.set(1.33, -0.07, 0); S.smileG.rotation.set(0, Math.PI / 2, 0); S.smileG.scale.setScalar(0.75);
   S.mouthG.visible = open >= 0.15;
   S.mouthG.position.set(1.27, -0.17, 0); S.mouthG.quaternion.setFromEuler(new THREE.Euler(0, Math.PI / 2, -0.75, 'ZYX'));
-  S.inner.scale.set(1.15, 0.2 + 0.85 * open, 1);
-  const conv = P.conv || 0;
+  S.inner.scale.set(MSX, 0.2 + 0.85 * open, 1);
+  const tsc = teethScale(open);
   for (const th of S.teeth) {
-    const p = th.row - (conv % 1);
-    const vis = p > -0.25;
-    th.m.visible = vis;
-    if (!vis) continue;
-    const u = th.i / 6 * 2 - 1;                 // -1..1 (입 가로)
-    const back = Math.max(p, 0);
-    let x, y;
-    if (th.up > 0) { x = u * 0.17 * (1 - 0.12 * back); y = -0.012 - 0.0 * back; }      // 위턱: 일자
-    else { const a = Math.PI + (u + 1) / 2 * Math.PI; x = Math.cos(a) * 0.17 * 1.15 * (1 - 0.15 * back); y = Math.sin(a) * 0.17 * (0.2 + 0.85 * open) * (1 - 0.15 * back) + 0.02; }
-    th.m.position.set(x, y, -0.015 - 0.035 * back);
-    const tilt = clamp(p, 0, 2) * 0.6;
-    th.m.rotation.set(th.up > 0 ? Math.PI - tilt : tilt, 0, th.up > 0 ? 0 : -Math.atan2(x, -y + 0.02) * 0.6);
-    th.m.scale.setScalar((p < 0 ? 1 + p * 2 : 1) * (1 - 0.18 * back));
+    const p = S.mouthG.visible && P.cues ? toothPose(th, t, P.cues, open) : null;
+    th.m.visible = !!p;
+    if (!p) continue;
+    th.m.position.set(p.x, p.y, p.z);
+    th.m.rotation.set(p.fold, 0, p.th, 'ZYX');
+    th.m.scale.setScalar(Math.max(p.s * tsc, 1e-3));
   }
   // 아가미, 로렌치니
   for (const g of S.gills) { const s = 0.72 + g.k * 0.018; g.m.position.set(xAt(s), 0.0, centerZ(s, t, P) + g.sz * radAt(s) * 0.8); g.m.rotation.set(g.sz * 0.2, 0, 0.15); }
@@ -468,7 +522,7 @@ function buildProps(font) {
 // ------------------------------------------------------------------ 포즈
 function blinkAt(t, off) { const bt = (t + off) % 3.4; return bt < 0.14 ? Math.max(0.1, 1 - Math.sin(Math.PI * bt / 0.14)) : 1; }
 function sharkPose(t, C) {
-  const P = { visible: true, x: 0, y: -0.15, z: 0, yaw: -0.55, pitch: 0, roll: 0, scale: 0.85, amp: 0.13, freq: 0.9, ice: 0, happy: false, blink: blinkAt(t, 0.3), mouth: 0, conv: 0, xray: 0, amp_glow: 0 };
+  const P = { visible: true, x: 0, y: -0.15, z: 0, yaw: -0.55, pitch: 0, roll: 0, scale: 0.85, amp: 0.13, freq: 0.9, ice: 0, happy: false, blink: blinkAt(t, 0.3), mouth: 0, cues: C, xray: 0, amp_glow: 0 };
   // 등장
   if (t < C.DASH[0]) P.visible = false;
   const d = easeOut(prog(t, C.DASH[0], C.DASH[1]));
@@ -480,7 +534,6 @@ function sharkPose(t, C) {
   const cl = easeIO(prog(t, c0, c1)) * (1 - easeIO(prog(t, c2, c3)));
   P.yaw = lerp(P.yaw, -1.05, cl); P.y = lerp(P.y, -0.1, cl); P.amp = lerp(P.amp, 0.04, cl);
   P.mouth = easeOut(prog(t, C.MOUTH[0], C.MOUTH[0] + 0.4)) * (1 - easeIO(prog(t, C.MOUTH[1] - 0.3, C.MOUTH[1])));
-  P.conv = t >= C.CONVEYOR[0] ? (t - C.CONVEYOR[0]) * 0.45 : 0;
   // 엑스레이
   if (t >= 10.2 && t < 16.6) { P.yaw = -0.32; P.y = 0.05; P.xray = (t >= C.XRAY[0] && t < C.XRAY[1]) ? 1 : 0; P.amp = 0.12; }
   // 전기
@@ -499,6 +552,7 @@ function sharkPose(t, C) {
 }
 
 // ------------------------------------------------------------------ 프레임 렌더
+const DROP_START = [];
 window.renderFrame = (S, opts = {}) => {
   const t = S.t, C = S.cues;
   causticTime.value = t;
@@ -518,6 +572,19 @@ window.renderFrame = (S, opts = {}) => {
   }
   moteGeo.attributes.position.needsUpdate = true;
   moteMat.size = mode === 'ice' ? 0.07 : 0.05; moteMat.opacity = mode === 'xray' ? 0.25 : 0.6;
+  TEETH_EV.forEach((ev, k) => {
+    const D = C.DROP[k];
+    if (t < D || (DROP_START[k] && DROP_START[k].D === D)) return;
+    updateShark(sharkPose(D, C), D);
+    shark.root.updateMatrixWorld(true);
+    const open = sharkPose(D, C).mouth, p0 = slotPose(ev.jaw, ev.i, 0, open);
+    p0.x += p0.dx * 0.01; p0.y += p0.dy * 0.01;              // 흔들림 끝의 헐거워진 위치와 맞춤
+    const M = shark.mouthG.matrixWorld.clone().multiply(toothLocalMatrix(p0, teethScale(open)));
+    const c = V(0, TOOTH_H / 2, 0).applyMatrix4(M), q = new THREE.Quaternion(), sc = V(1, 1, 1), pos = V(0, 0, 0);
+    M.decompose(pos, q, sc);
+    const n = V(0, 0, 1).transformDirection(shark.mouthG.matrixWorld);
+    DROP_START[k] = { D, c, q, s: sc, n };
+  });
   const P = sharkPose(t, C);
   updateShark(P, t);
   shark.root.updateMatrixWorld(true);
@@ -528,15 +595,29 @@ window.renderFrame = (S, opts = {}) => {
   anchors.snout = project(toW(1.4, 0.0, centerZ(0.97, t, P)));
   anchors.body = project(toW(0.1, 0.05, centerZ(0.5, t, P)));
   anchors.head = project(toW(0.9, 0.35, centerZ(0.85, t, P)));
-  // 빠지는 앞니
-  const dt = t - C.DROP;
-  shark.dropTooth.visible = dt >= 0 && dt < 1.6 && t < 10.2;
-  if (shark.dropTooth.visible) {
-    const p0 = toW(1.3, -0.2, 0.02);
-    shark.dropTooth.position.copy(p0).add(V(0.05 * dt, -0.9 * dt * dt - 0.1 * dt, 0.25 * dt));
-    shark.dropTooth.rotation.set(dt * 7, 0, dt * 5); shark.dropTooth.scale.setScalar(1.4);
-    anchors.drop = project(shark.dropTooth.position);
-  }
+  // 빠지는 이빨: 빠지는 순간의 자세에서 떨어져 나와 천천히 가라앉음
+  TEETH_EV.forEach((ev, k) => {
+    const m = shark.dropTeeth[k], D = C.DROP[k], tau = t - D;
+    m.visible = tau >= 0 && tau < 1.9 && t < C.CLOSE[3];
+    if (!m.visible) return;
+    const st = DROP_START[k];
+    const side = k ? 1 : -1;
+    const pop = 1 - Math.exp(-tau / 0.12);                  // 툭: 앞쪽 위로 살짝 튀어나온 뒤
+    const fwd = V(st.n.x, 0, st.n.z).normalize();
+    m.position.copy(st.c).addScaledVector(fwd, 0.06 * pop)   // 물속이라 천천히 하늘하늘 가라앉음
+      .add(V(side * (0.04 * tau + 0.03 * Math.sin(tau * 3.5)), 0.025 * pop - (0.08 * tau + 0.2 * tau * tau), 0));
+    _q.setFromAxisAngle(V(0.25, 0.35, 1).normalize(), side * (1.3 * tau + 0.25 * Math.sin(tau * 5)));
+    m.quaternion.copy(_q).multiply(st.q);
+    m.scale.copy(st.s);
+    if (tau < 1.2) anchors['drop' + k] = project(m.position);
+  });
+  // 앞으로 나온 새 이빨
+  TEETH_EV.forEach((ev, k) => {
+    const R = C.REPLACE[k];
+    if (t < R || t >= R + 1.0) return;
+    const th = shark.teeth.find((x) => x.jaw === ev.jaw && x.i === ev.i && x.row === 1);
+    if (th.m.visible) anchors['new' + k] = project(th.m.localToWorld(V(0, TOOTH_H * 0.5, 0)));
+  });
   // 넙치 + 전기 신호
   const fy = t >= C.FOUND ? easeOut(prog(t, C.FOUND, C.FOUND + 0.4)) : 0;
   flatfish.visible = t >= 16.6 && t < 22.6;

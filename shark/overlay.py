@@ -1,7 +1,7 @@
 """상어 편 자막/UI 오버레이. src/composite3d.py --overlay shark/overlay.py 로 사용.
 
 공용 UI(배지, 헤더, 전환 거품, 구독 버튼)는 src/render.py 를 그대로 쓰고,
-상어 편 전용 요소(자막, '툭!', 이빨 화살표, 엑스레이 스캔, 번개, 400살 카운터)만 여기서 그린다.
+상어 편 전용 요소(자막, '툭!'/'쏙!', 새 이빨 반짝, 엑스레이 스캔, 번개, 400살 카운터)만 여기서 그린다.
 """
 import importlib.util
 import math
@@ -38,7 +38,7 @@ TEXTS = [
     (27.70, 30.5, "big", 440, [("신기하죠?", YE)]),
     (28.00, 30.5, "sub", 590, [("다음 바다 이야기도 궁금하다면", WH)]),
 ]
-PUNCHES = [C["DASH"][0] + 0.25, C["DROP"], C["XRAY"][0], C["FOUND"], C["COUNT"][1], 28.8]
+PUNCHES = [C["DASH"][0] + 0.25, *C["DROP"], C["XRAY"][0], C["FOUND"], C["COUNT"][1], 28.8]
 
 
 def camera_zoom(t):
@@ -83,45 +83,33 @@ def draw_dash(ctx, t, anchors):
         R.draw_sparkle(ctx, x + d * math.cos(ang), y + d * 0.8 * math.sin(ang), 28 * (1 - ph) + 3, 1 - ph, YE if i % 2 else WH)
 
 
-def curved_arrow(ctx, x0, y0, x1, y1, a, bend=-60):
-    mx, my = (x0 + x1) / 2, (y0 + y1) / 2 + bend
-    ctx.save()
-    ctx.set_line_cap(cairo.LINE_CAP_ROUND)
-    for lw, col in ((14, R.NAVY), (8, YE)):
-        ctx.new_path()
-        ctx.move_to(x0, y0)
-        ctx.curve_to(mx, my, mx, my, x1, y1)
-        ctx.set_source_rgba(*col, a)
-        ctx.set_line_width(lw)
-        ctx.stroke()
-    ang = math.atan2(y1 - my, x1 - mx)
-    ctx.new_path()
-    ctx.move_to(x1 + 22 * math.cos(ang), y1 + 22 * math.sin(ang))
-    ctx.line_to(x1 + 22 * math.cos(ang + 2.4), y1 + 22 * math.sin(ang + 2.4))
-    ctx.line_to(x1 + 22 * math.cos(ang - 2.4), y1 + 22 * math.sin(ang - 2.4))
-    ctx.close_path()
-    ctx.set_source_rgba(*YE, a)
-    ctx.fill_preserve()
-    ctx.set_source_rgba(*R.NAVY, a)
-    ctx.set_line_width(4)
-    ctx.stroke()
-    ctx.restore()
-
-
 def draw_teeth(ctx, t, anchors):
-    d0 = C["DROP"]
-    if "drop" in anchors:
-        a = R.prog(t, d0, d0 + 0.15) * (1 - R.prog(t, d0 + 0.9, d0 + 1.2))
-        x, y = anchors["drop"]
-        chip(ctx, "툭!", x + 90, y - 30, a, WH, 60)
-    c0, c1 = C["CONVEYOR"]
-    a = R.prog(t, d0 + 0.5, d0 + 0.8) * (1 - R.prog(t, c1, c1 + 0.2))
-    if a > 0 and "mouth" in anchors:
-        x, y = anchors["mouth"]
-        for k, dx in enumerate((-170, 170)):
-            ph = ((t - d0) * 0.8 + k * 0.5) % 1
-            curved_arrow(ctx, x + dx * 1.15, y + 140, x + dx * 0.55, y + 40, a * (0.55 + 0.45 * R.bump(ph)), bend=60)
-        chip(ctx, "새 이빨 등장!", x, y + 230, a, YE, 46)
+    for k, d0 in enumerate(C["DROP"]):
+        key = f"drop{k}"
+        if key in anchors:
+            a = R.prog(t, d0, d0 + 0.12) * (1 - R.prog(t, d0 + 0.8, d0 + 1.05))
+            x, y = anchors[key]
+            chip(ctx, "툭!", x + (-95 if k == 0 else 95), y - 10, a, WH, 58)
+    for k, r0 in enumerate(C["REPLACE"]):
+        key = f"new{k}"
+        if key not in anchors:
+            continue
+        x, y = anchors[key]
+        ph = R.prog(t, r0 + 0.2, r0 + 0.75)
+        if 0 < ph < 1:                       # 반짝 고리
+            ctx.save()
+            ctx.new_path()
+            ctx.arc(x, y, 20 + 70 * R.ease_out(ph), 0, math.tau)
+            ctx.set_source_rgba(*YE, 0.9 * (1 - ph))
+            ctx.set_line_width(7 * (1 - ph) + 1)
+            ctx.stroke()
+            ctx.restore()
+            for j in range(4):
+                ang = j * math.tau / 4 + 0.6
+                d = 40 + 60 * R.ease_out(ph)
+                R.draw_sparkle(ctx, x + d * math.cos(ang), y + d * math.sin(ang), 18 * (1 - ph) + 2, 1 - ph, YE if j % 2 else WH)
+        a = R.prog(t, r0 + 0.15, r0 + 0.3) * (1 - R.prog(t, r0 + 0.6, r0 + 0.8))
+        chip(ctx, "쏙!", x + (75 if k == 0 else 90), y + (85 if k == 0 else -60), a, YE, 58)
 
 
 def draw_xray(ctx, t, anchors):
