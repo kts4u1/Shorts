@@ -528,7 +528,8 @@ function scenePose(t, C) {
     const walking = bump1(prog(t, C.WALK[0] - 0.1, C.WALK[1] + 0.1));
     A.arms.forEach((a, k) => { a.yaw += 0.16 * walking * Math.sin(t * 8 + k * 1.3); a.curl += 0.12 * walking * Math.sin(t * 8 + k * 1.3 + 1.2); });
     const hg = easeIO(prog(t, C.HUG[0], C.HUG[1]));
-    A.y = STAR_Y + 0.36 * hg;
+    const climb = Math.max(hg, smooth(C.WALK[0] + 0.35, C.WALK[1], t));      // 다가가며 조개 위로 올라탐
+    A.y = STAR_Y + 0.36 * climb;
     A.arms.forEach((a) => { a.lift += 0.35 * hg; a.curl = lerp(a.curl, -2.3, hg); });
     S.clamOpen = 0.45 * easeOut(prog(t, C.OPEN[0], C.OPEN[1]));
     S.stomach = easeOut(prog(t, C.STOMACH[0], C.STOMACH[0] + 0.7)) * (1 - easeIO(prog(t, C.STOMACH[1] - 0.35, C.STOMACH[1])));
