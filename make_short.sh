@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # 쇼츠 영상 빌드
-#   ./make_short.sh          전부 (문어 2D + 문어 3D + 해달 3D + 해파리 3D + 해마 3D)
+#   ./make_short.sh          전부 (문어 2D/3D + 해달 + 해파리 + 해마 + 바다거북 3D)
 #   ./make_short.sh 2d       문어 편 2D
 #   ./make_short.sh 3d       문어 편 3D
 #   ./make_short.sh otter    해달 편 3D
 #   ./make_short.sh jelly    해파리 편 3D
 #   ./make_short.sh seahorse 해마 편 3D
+#   ./make_short.sh turtle   바다거북 편 3D
 # 필요: python3, node 18+, ffmpeg, Chromium(Playwright), 나눔폰트(fonts-nanum), pip install -r requirements.txt
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -67,4 +68,16 @@ if [ "$what" = all ] || [ "$what" = seahorse ]; then
   node 3d/render3d.cjs --root seahorse --states build/seahorse/states.json --out build/seahorse/frames --workers 3
   python3 src/composite3d.py --frames build/seahorse/frames --overlay seahorse/overlay.py \
     --audio build/seahorse/audio.wav --out output/seahorse_short_3d.mp4
+fi
+
+# 바다거북 편 3D
+if [ "$what" = all ] || [ "$what" = turtle ]; then
+  mkdir -p build/turtle
+  [ -f build/turtle/narration.wav ] || python3 src/narration.py --timeline turtle/timeline.py --out build/turtle/narration.wav
+  python3 src/audio.py build/turtle/audio.wav --narration build/turtle/narration.wav --timeline turtle/timeline.py
+  (cd 3d && npm install --silent)
+  python3 turtle/states.py build/turtle/states.json
+  node 3d/render3d.cjs --root turtle --states build/turtle/states.json --out build/turtle/frames --workers 3
+  python3 src/composite3d.py --frames build/turtle/frames --overlay turtle/overlay.py \
+    --audio build/turtle/audio.wav --out output/turtle_short_3d.mp4
 fi
