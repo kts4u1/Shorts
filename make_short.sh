@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 쇼츠 영상 빌드
-#   ./make_short.sh          전부 (문어 2D/3D + 해달 + 해파리 + 해마 + 바다거북 + 상어 3D)
+#   ./make_short.sh          전부 (문어 2D/3D + 해달 + 해파리 + 해마 + 바다거북 + 상어 + 불가사리 3D)
 #   ./make_short.sh 2d       문어 편 2D
 #   ./make_short.sh 3d       문어 편 3D
 #   ./make_short.sh otter    해달 편 3D
@@ -8,6 +8,7 @@
 #   ./make_short.sh seahorse 해마 편 3D
 #   ./make_short.sh turtle   바다거북 편 3D
 #   ./make_short.sh shark    상어 편 3D
+#   ./make_short.sh starfish 불가사리 편 3D
 # 필요: python3, node 18+, ffmpeg, Chromium(Playwright), 나눔폰트(fonts-nanum), pip install -r requirements.txt
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -93,4 +94,16 @@ if [ "$what" = all ] || [ "$what" = shark ]; then
   node 3d/render3d.cjs --root shark --states build/shark/states.json --out build/shark/frames --workers 3
   python3 src/composite3d.py --frames build/shark/frames --overlay shark/overlay.py \
     --audio build/shark/audio.wav --out output/shark_short_3d.mp4
+fi
+
+# 불가사리 편 3D
+if [ "$what" = all ] || [ "$what" = starfish ]; then
+  mkdir -p build/starfish
+  [ -f build/starfish/narration.wav ] || python3 src/narration.py --timeline starfish/timeline.py --out build/starfish/narration.wav
+  python3 src/audio.py build/starfish/audio.wav --narration build/starfish/narration.wav --timeline starfish/timeline.py
+  (cd 3d && npm install --silent)
+  python3 starfish/states.py build/starfish/states.json
+  node 3d/render3d.cjs --root starfish --states build/starfish/states.json --out build/starfish/frames --workers 3
+  python3 src/composite3d.py --frames build/starfish/frames --overlay starfish/overlay.py \
+    --audio build/starfish/audio.wav --out output/starfish_short_3d.mp4
 fi

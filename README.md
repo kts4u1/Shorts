@@ -1,11 +1,12 @@
-# Shorts: 신기한 바다 상식 🐙🦦🪼🐴🐢🦈
+# Shorts: 신기한 바다 상식 🐙🦦🪼🐴🐢🦈⭐
 
 유튜브 쇼츠용 **30초 세로형(1080×1920, 30fps)** 영상 시리즈입니다.
 그림·애니메이션·음악·효과음·나레이션 모두 코드와 오픈 모델로 직접 생성했습니다.
 
 | 파일 | 내용 |
 |---|---|
-| [`output/shark_short_3d.mp4`](output/shark_short_3d.mp4) | **6편 상어 — 3D + 나레이션** |
+| [`output/starfish_short_3d.mp4`](output/starfish_short_3d.mp4) | **7편 불가사리 — 3D + 나레이션** |
+| [`output/shark_short_3d.mp4`](output/shark_short_3d.mp4) | 6편 상어 — 3D + 나레이션 |
 | [`output/turtle_short_3d.mp4`](output/turtle_short_3d.mp4) | 5편 바다거북 — 3D + 나레이션 |
 | [`output/seahorse_short_3d.mp4`](output/seahorse_short_3d.mp4) | 4편 해마 — 3D + 나레이션 |
 | [`output/jelly_short_3d.mp4`](output/jelly_short_3d.mp4) | 3편 해파리 — 3D + 나레이션 |
@@ -13,6 +14,22 @@
 | [`output/octopus_short_3d.mp4`](output/octopus_short_3d.mp4) | 1편 문어 — 3D + 나레이션 |
 | [`output/octopus_short_2d_voice.mp4`](output/octopus_short_2d_voice.mp4) | 1편 문어 — 2D + 나레이션 |
 | [`output/octopus_short.mp4`](output/octopus_short.mp4) | 1편 문어 — 2D (나레이션 없는 첫 버전) |
+
+## 7편: 불가사리 (30초)
+
+| 구간 | 내용 | 나레이션 |
+|---|---|---|
+| 0.0–3.6s | 훅 (어둠 속에서 켜지는 팔 끝 눈) | "팔 끝에 눈이 달린 동물이 있다고요?" |
+| 3.6–10.2s | 사실 1: 다섯 팔 끝마다 눈 | "정답은 불가사리예요. 다섯 팔 끝마다 작은 눈이 하나씩 있어요." |
+| 10.2–16.6s | 사실 2: 팔이 다시 자람 | "팔이 잘려도 다시 자라요. 팔 하나가 새 불가사리가 되기도 해요." |
+| 16.6–22.6s | 사실 3: 피 대신 바닷물, 관족 | "피 대신 바닷물이 몸속을 돌아요. 그 물로 수백 개의 작은 발을 움직여요." |
+| 22.6–27.6s | 사실 4: 위를 꺼내서 먹음 | "먹는 방법도 신기해요. 위를 몸 밖으로 꺼내서 먹어요." |
+| 27.6–30.0s | 아웃트로 | "신기하죠? 구독하고 또 만나요." |
+
+- 장면: 모래 바닥의 불가사리(휘고 말리는 다섯 팔, 돌기, 팔 끝의 빨간 눈), 팔 끝을 들어 올리며 하나씩 반짝이는 눈,
+  떨어진 팔과 다시 자라는 팔, 떨어진 팔에서 몸통과 작은 팔이 자라나는 새 불가사리, 투명해진 몸속을 흐르는 바닷물(수관계),
+  뒤집어 보이는 관족, 조개를 감싸고 위를 꺼내 먹는 모습
+- 파일: `starfish/timeline.py`, `starfish/scene.js`, `starfish/overlay.py`, `starfish/states.py`
 
 ## 6편: 상어 (30초)
 
@@ -25,7 +42,7 @@
 | 22.6–27.6s | 사실 4: 그린란드상어 400년 | "오래 사는 상어도 있어요. 그린란드상어가 사백 년 가까이 살아요." |
 | 27.6–30.0s | 아웃트로 | "신기하죠? 구독하고 또 만나요." |
 
-- 장면: 헤엄치며 몸이 휘는 상어(등은 회청색·배는 흰색), 입속 클로즈업과 컨베이어처럼 앞으로 나오는 이빨 줄,
+- 장면: 헤엄치며 몸이 휘는 상어(등은 회청색·배는 흰색), 입속 클로즈업(잇몸과 앞줄·뒷줄 이빨, 흔들리다 빠지는 이빨과 빈자리를 채우는 뒷줄 이빨),
   엑스레이 골격(척추·머리뼈·턱·지느러미 살), 빛나는 로렌치니 기관과 모래 속 넙치의 전기 신호, 얼음 바다의 그린란드상어
 - 파일: `shark/timeline.py`, `shark/scene.js`, `shark/overlay.py`, `shark/states.py`
 
@@ -122,7 +139,7 @@
 ```bash
 sudo apt-get install -y ffmpeg fonts-nanum
 pip install -r requirements.txt
-./make_short.sh          # 전부 (2d / 3d / otter / jelly / seahorse / turtle / shark 인자로 하나만 가능)
+./make_short.sh          # 전부 (2d / 3d / otter / jelly / seahorse / turtle / shark / starfish 인자로 하나만 가능)
 ```
 
 다른 목소리로 바꾸기 (F1–F5 여성, M1–M5 남성, 섞기 가능):
