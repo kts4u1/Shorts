@@ -121,12 +121,12 @@ def asr_score(seg, text):
 
     def norm(x):
         # 소리가 같은 표기(동음)는 같은 것으로 본다: ㅐ/ㅔ 합류, 연음 표기 등
-        x = re.sub(r"[^가-힣]", "", x).replace("때는", "땐").replace("해팔이", "해파리").replace("아를", "알을").replace("의", "에")
+        x = re.sub(r"[^가-힣]", "", x).replace("때는", "땐").replace("해팔이", "해파리").replace("아를", "알을").replace("그릴란드", "그린란드").replace("의", "에")
         out = []
         for ch in x:
             c = ord(ch) - 0xAC00
             ini, med, fin = c // 588, (c % 588) // 28, c % 28
-            med = {5: 1, 7: 3}.get(med, med)   # ㅔ->ㅐ, ㅖ->ㅒ
+            med = {5: 1, 7: 1, 3: 1}.get(med, med)   # ㅔ/ㅖ/ㅒ -> ㅐ (에요/예요 등 같은 소리)
             out.append(chr(0xAC00 + ini * 588 + med * 28 + fin))
         return "".join(out)
     r, h = norm(text), norm(hyp)
