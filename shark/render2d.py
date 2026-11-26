@@ -40,17 +40,6 @@ def smooth(a, b, x):
     return k * k * (3 - 2 * k)
 
 
-def interp(keys, s):
-    """(위치, 값) 키 사이를 코사인 보간."""
-    s = clamp(s)
-    for (s0, v0), (s1, v1) in zip(keys, keys[1:]):
-        if s <= s1:
-            k = (s - s0) / (s1 - s0) if s1 > s0 else 0
-            k = (1 - math.cos(math.pi * k)) / 2
-            return v0 + (v1 - v0) * k
-    return keys[-1][1]
-
-
 def fill_stroke(ctx, fill, line=NAVY, lw=6, alpha=1.0):
     ctx.set_source_rgba(*fill, alpha)
     ctx.fill_preserve()
@@ -166,8 +155,42 @@ def draw_ice_bg(ctx, t):
 
 # ---------------------------------------------------------------- 상어 (옆모습)
 L = 620
-TOP_K = [(0, 10), (0.07, 17), (0.16, 35), (0.32, 73), (0.5, 106), (0.64, 114), (0.78, 106), (0.88, 88), (0.95, 60), (0.985, 31), (1.0, 0)]
-BOT_K = [(0, 10), (0.07, 15), (0.16, 30), (0.32, 63), (0.5, 94), (0.64, 101), (0.78, 92), (0.88, 73), (0.95, 47), (0.985, 24), (1.0, 0)]
+TOP_K = [(0, 10), (0.08, 18), (0.2, 42), (0.36, 80), (0.52, 106), (0.64, 113), (0.76, 108), (0.88, 92), (0.95, 76), (1.0, 64)]
+BOT_K = [(0, 10), (0.08, 16), (0.2, 36), (0.36, 70), (0.52, 94), (0.64, 100), (0.76, 94), (0.88, 78), (0.95, 64), (1.0, 54)]
+
+
+def pchip_table(keys, n=1201):
+    """키 점을 지나는 단조 3차 보간을 표로 만든다. 키마다 평평해지지 않아 윤곽이 울퉁불퉁하지 않다."""
+    xs, ys = [k[0] for k in keys], [k[1] for k in keys]
+    m = len(xs)
+    h = [xs[i + 1] - xs[i] for i in range(m - 1)]
+    d = [(ys[i + 1] - ys[i]) / h[i] for i in range(m - 1)]
+    sl = [d[0]] + [0.0] * (m - 2) + [d[-1]]
+    for i in range(1, m - 1):
+        if d[i - 1] * d[i] > 0:
+            w1, w2 = 2 * h[i] + h[i - 1], h[i] + 2 * h[i - 1]
+            sl[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i])
+    out, i = [], 0
+    for j in range(n):
+        s = j / (n - 1)
+        while i < m - 2 and s > xs[i + 1]:
+            i += 1
+        u = (s - xs[i]) / h[i]
+        y = ((2 * u ** 3 - 3 * u ** 2 + 1) * ys[i] + (u ** 3 - 2 * u ** 2 + u) * h[i] * sl[i]
+             + (-2 * u ** 3 + 3 * u ** 2) * ys[i + 1] + (u ** 3 - u ** 2) * h[i] * sl[i + 1])
+        if s > 0.9:                                      # 둥근 주둥이 (끝에서 세로로 닫힘)
+            y *= math.sqrt(max(0.0, 1 - ((s - 0.9) / 0.1) ** 2))
+        out.append(y)
+    return out
+
+
+TOP_T, BOT_T = pchip_table(TOP_K), pchip_table(BOT_K)
+
+
+def table_at(tab, s):
+    f = clamp(s) * (len(tab) - 1)
+    i = min(int(f), len(tab) - 2)
+    return tab[i] + (tab[i + 1] - tab[i]) * (f - i)
 AMP_DOTS = [(0.9, -0.35), (0.92, -0.1), (0.935, -0.5), (0.95, -0.22), (0.965, -0.45), (0.972, 0.0), (0.955, 0.3), (0.925, 0.22),
             (0.905, 0.1), (0.942, 0.08), (0.982, -0.18), (0.885, -0.15)]
 
@@ -187,11 +210,11 @@ def cy_(s, t, P):
 
 
 def top(s):
-    return interp(TOP_K, s)
+    return table_at(TOP_T, s)
 
 
 def bot(s):
-    return interp(BOT_K, s)
+    return table_at(BOT_T, s)
 
 
 def body_path(ctx, t, P, n=90):
@@ -273,12 +296,12 @@ def eye(ctx, x, y, rx, ry, P, t, look=(0.25, 0.08), line=NAVY):
     ctx.fill()
     if expr == "sleepy":                                 # 졸린 듯 반쯤 감은 눈꺼풀
         ctx.new_path()
-        ctx.rectangle(x - rx * 1.5, y - ry * 1.5, rx * 3, ry * 1.42)
+        ctx.rectangle(x - rx * 1.5, y - ry * 1.5, rx * 3, ry * 1.12)
         ctx.set_source_rgb(*ICE_TOP)
         ctx.fill()
         ctx.new_path()
-        ctx.move_to(x - rx, y - ry * 0.08)
-        ctx.line_to(x + rx, y - ry * 0.08)
+        ctx.move_to(x - rx * 0.95, y - ry * 0.38)
+        ctx.line_to(x + rx * 0.95, y - ry * 0.38)
         ctx.set_source_rgb(*line)
         ctx.set_line_width(4)
         ctx.stroke()
@@ -350,7 +373,7 @@ def draw_shark_side(ctx, t, P):
         for i in range(n, -1, -1):
             s = i / n
             k = lerp(0.32, -0.05, smooth(0.84, 1.0, s))
-            ctx.line_to(sx(s), cy_(s, t, P) + bot(s) * k + 4 * math.sin(s * 40))
+            ctx.line_to(sx(s), cy_(s, t, P) + bot(s) * k)
         ctx.close_path()
         ctx.set_source_rgb(*topc)
         ctx.fill()
@@ -362,12 +385,6 @@ def draw_shark_side(ctx, t, P):
         ctx.set_line_width(14)
         ctx.set_line_cap(cairo.LINE_CAP_ROUND)
         ctx.stroke()
-        if ice:                                          # 그린란드상어 얼룩
-            for k in range(14):
-                s = 0.15 + 0.7 * rnd(k, 31)
-                R.ellipse(ctx, sx(s), cy_(s, t, P) - top(s) * (0.2 + 0.6 * rnd(k, 32)), 6 + 6 * rnd(k, 33), 4 + 3 * rnd(k, 34))
-                ctx.set_source_rgba(1, 1, 1, 0.18)
-                ctx.fill()
         ctx.restore()
         body_path(ctx, t, P)
         ctx.set_source_rgb(*NAVY)
@@ -382,7 +399,7 @@ def draw_shark_side(ctx, t, P):
         ctx.new_path()
         ctx.move_to(sx(s) + 4, y0 - top(s) * 0.28)
         ctx.curve_to(sx(s) - 6, y0, sx(s) - 6, y0 + bot(s) * 0.2, sx(s) + 2, y0 + bot(s) * 0.4)
-        ctx.set_source_rgba(*(XRAY if xr else NAVY), 0.55 if not xr else 0.4)
+        ctx.set_source_rgba(*(XRAY if xr else NAVY), 0.4)
         ctx.set_line_width(4.5)
         ctx.set_line_cap(cairo.LINE_CAP_ROUND)
         ctx.stroke()
@@ -398,8 +415,8 @@ def draw_shark_side(ctx, t, P):
             ctx.set_source(rg)
             R.circle(ctx, x, y, 22)
             ctx.fill()
-        R.circle(ctx, x, y, 3.6)
-        ctx.set_source_rgba(*(hx("#fff3a0") if g > 0.3 else (XRAY if xr else NAVY)), 0.95 if g > 0.3 else 0.45)
+        R.circle(ctx, x, y, 3.6 if g > 0.3 else 2.6)
+        ctx.set_source_rgba(*(hx("#fff3a0") if g > 0.3 else (XRAY if xr else NAVY)), 0.95 if g > 0.3 else 0.22)
         ctx.fill()
     # 얼굴
     if not xr:
@@ -708,8 +725,8 @@ def draw_shark_front(ctx, t, cx, cy, sc, alpha, open_, anchors):
     for k in range(14):                                  # 로렌치니 점
         x = (-1 if k % 2 else 1) * (40 + 150 * rnd(k, 41))
         y = -200 + 150 * rnd(k, 42)
-        R.circle(ctx, x, y, 5)
-        ctx.set_source_rgba(*NAVY, 0.4)
+        R.circle(ctx, x, y, 3.5)
+        ctx.set_source_rgba(*NAVY, 0.18)
         ctx.fill()
     P = dict(expr="normal")
     for side in (-1, 1):
