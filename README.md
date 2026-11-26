@@ -7,6 +7,7 @@
 |---|---|
 | [`output/starfish_short_3d.mp4`](output/starfish_short_3d.mp4) | **7편 불가사리 — 3D + 나레이션** |
 | [`output/shark_short_3d.mp4`](output/shark_short_3d.mp4) | 6편 상어 — 3D + 나레이션 |
+| [`output/shark_short_2d.mp4`](output/shark_short_2d.mp4) | 6편 상어 — 2D + 나레이션 |
 | [`output/turtle_short_3d.mp4`](output/turtle_short_3d.mp4) | 5편 바다거북 — 3D + 나레이션 |
 | [`output/seahorse_short_3d.mp4`](output/seahorse_short_3d.mp4) | 4편 해마 — 3D + 나레이션 |
 | [`output/jelly_short_3d.mp4`](output/jelly_short_3d.mp4) | 3편 해파리 — 3D + 나레이션 |
@@ -44,7 +45,9 @@
 
 - 장면: 헤엄치며 몸이 휘는 상어(등은 회청색·배는 흰색), 입속 클로즈업(잇몸과 앞줄·뒷줄 이빨, 흔들리다 빠지는 이빨과 빈자리를 채우는 뒷줄 이빨),
   엑스레이 골격(척추·머리뼈·턱·지느러미 살), 빛나는 로렌치니 기관과 모래 속 넙치의 전기 신호, 얼음 바다의 그린란드상어
-- 파일: `shark/timeline.py`, `shark/scene.js`, `shark/overlay.py`, `shark/states.py`
+- 2D 판: 같은 나레이션·자막에 평면 일러스트(남색 테두리, 귀여운 얼굴)로 그린 상어. 이빨 장면은 정면 얼굴 클로즈업,
+  엑스레이는 빛나는 연골 골격, 모래 속 넙치, 얼음 바다의 졸린 그린란드상어 (`shark/render2d.py`)
+- 파일: `shark/timeline.py`, `shark/scene.js`, `shark/overlay.py`, `shark/states.py`, `shark/render2d.py`
 
 ## 5편: 바다거북 (30초)
 
@@ -139,7 +142,7 @@
 ```bash
 sudo apt-get install -y ffmpeg fonts-nanum
 pip install -r requirements.txt
-./make_short.sh          # 전부 (2d / 3d / otter / jelly / seahorse / turtle / shark / starfish 인자로 하나만 가능)
+./make_short.sh          # 전부 (2d / 3d / otter / jelly / seahorse / turtle / shark / shark2d / starfish 인자로 하나만 가능)
 ```
 
 다른 목소리로 바꾸기 (F1–F5 여성, M1–M5 남성, 섞기 가능):

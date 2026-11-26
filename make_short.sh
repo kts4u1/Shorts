@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 쇼츠 영상 빌드
-#   ./make_short.sh          전부 (문어 2D/3D + 해달 + 해파리 + 해마 + 바다거북 + 상어 + 불가사리 3D)
+#   ./make_short.sh          전부 (문어 2D/3D + 해달 + 해파리 + 해마 + 바다거북 + 상어 2D/3D + 불가사리 3D)
 #   ./make_short.sh 2d       문어 편 2D
 #   ./make_short.sh 3d       문어 편 3D
 #   ./make_short.sh otter    해달 편 3D
@@ -8,6 +8,7 @@
 #   ./make_short.sh seahorse 해마 편 3D
 #   ./make_short.sh turtle   바다거북 편 3D
 #   ./make_short.sh shark    상어 편 3D
+#   ./make_short.sh shark2d  상어 편 2D
 #   ./make_short.sh starfish 불가사리 편 3D
 # 필요: python3, node 18+, ffmpeg, Chromium(Playwright), 나눔폰트(fonts-nanum), pip install -r requirements.txt
 set -euo pipefail
@@ -94,6 +95,14 @@ if [ "$what" = all ] || [ "$what" = shark ]; then
   node 3d/render3d.cjs --root shark --states build/shark/states.json --out build/shark/frames --workers 3
   python3 src/composite3d.py --frames build/shark/frames --overlay shark/overlay.py \
     --audio build/shark/audio.wav --out output/shark_short_3d.mp4
+fi
+
+# 상어 편 2D (3D 편과 같은 나레이션·효과음·자막)
+if [ "$what" = all ] || [ "$what" = shark2d ]; then
+  mkdir -p build/shark
+  [ -f build/shark/narration.wav ] || python3 src/narration.py --timeline shark/timeline.py --out build/shark/narration.wav
+  [ -f build/shark/audio.wav ] || python3 src/audio.py build/shark/audio.wav --narration build/shark/narration.wav --timeline shark/timeline.py
+  python3 shark/render2d.py --audio build/shark/audio.wav --out output/shark_short_2d.mp4
 fi
 
 # 불가사리 편 3D
